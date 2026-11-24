@@ -724,6 +724,26 @@ fn used() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
     used
 }
 
+/// Whether the host driver died making the title pipeline with `key` in
+/// a pre-build (`translate --cache --pipelines` lists it in
+/// `prebuild-crashed.txt`): a run skips it as `VICTORY_SKIP_PIPELINES` does
+/// (it crashed in amdxc64.dll at its first bind on RX 9070 XT).
+pub(crate) fn crashed(key: &str) -> bool {
+    static CRASHED: OnceLock<HashSet<String>> = OnceLock::new();
+    CRASHED
+        .get_or_init(|| {
+            let listed = DIR
+                .get()
+                .and_then(|d| std::fs::read_to_string(d.join("prebuild-crashed.txt")).ok())
+                .unwrap_or_default();
+            let set: HashSet<String> =
+                listed.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect();
+            tracing::info!(pipelines = set.len(), "pipelines skipped: the host driver died on them in a pre-build");
+            set
+        })
+        .contains(key)
+}
+
 /// Whether the title pipeline with `key` was requested in this or an earlier run.
 pub(crate) fn wanted_early(key: &str) -> bool {
     used().as_ref().is_some_and(|s| s.contains(key))

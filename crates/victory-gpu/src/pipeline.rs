@@ -704,7 +704,11 @@ fn skipped_shader(shaders: &[Arc<Shader>]) -> Option<&str> {
 
 #[cfg(windows)]
 pub(crate) fn is_skipped(this: This) -> bool {
-    !this.is_null() && skipped_shader(&pipeline(this).shaders).is_some()
+    if this.is_null() {
+        return false;
+    }
+    let p = pipeline(this);
+    skipped_shader(&p.shaders).is_some() || library::crashed(&p.host.key)
 }
 
 /// Counts a draw or dispatch of `this` intentionally skipped or dropped
@@ -715,12 +719,16 @@ pub(crate) fn note_drop(this: This) {
         "no pipeline set".to_owned()
     } else {
         let p = pipeline(this);
-        skipped_shader(&p.shaders).map(|hash| format!("skipped shader {hash}")).or_else(|| make::missing(&p.host)).unwrap_or_else(|| {
-            // (Neptune) Its host pipeline is there: the draw was left out for another
-            // reason (its views or buffers could not be made ready, or a filter of ours).
-            let shaders: Vec<String> = p.shaders.iter().map(|s| format!("{} {}", s.stage, s.hash)).collect();
-            format!("pipeline made, draw not run [{}]", shaders.join(", "))
-        })
+        skipped_shader(&p.shaders)
+            .map(|hash| format!("skipped shader {hash}"))
+            .or_else(|| library::crashed(&p.host.key).then(|| "crashed the driver in a pre-build".to_owned()))
+            .or_else(|| make::missing(&p.host))
+            .unwrap_or_else(|| {
+                // (Neptune) Its host pipeline is there: the draw was left out for another
+                // reason (its views or buffers could not be made ready, or a filter of ours).
+                let shaders: Vec<String> = p.shaders.iter().map(|s| format!("{} {}", s.stage, s.hash)).collect();
+                format!("pipeline made, draw not run [{}]", shaders.join(", "))
+            })
     };
     note_why(why);
 }
@@ -768,7 +776,7 @@ fn hand_out(
     #[cfg(windows)]
     // A skipped shader's pipeline is never drawn with: not prewarmed either,
     // even if an earlier run's early-pipelines.txt lists it.
-    if skipped_shader(&shaders).is_none() {
+    if skipped_shader(&shaders).is_none() && !library::crashed(&host.key) {
         make::early(&host);
     }
     #[cfg(windows)]
