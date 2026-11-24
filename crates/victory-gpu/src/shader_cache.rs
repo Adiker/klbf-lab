@@ -56,6 +56,11 @@ fn build() -> &'static [u8; 32] {
                 bytes.extend_from_slice(&limit.to_le_bytes());
                 // Which group barriers wait is part of the translation too.
                 bytes.push(victory_shader::emit::group_sync());
+                // so are the wave switches (`VICTORY_HOST_WAVE`, `VICTORY_PS_HALVES`)
+                for name in ["VICTORY_HOST_WAVE", "VICTORY_PS_HALVES"] {
+                    bytes.extend_from_slice(std::env::var(name).unwrap_or_default().as_bytes());
+                    bytes.push(0);
+                }
                 *blake3::hash(&bytes).as_bytes()
             }
             Err(e) => {
