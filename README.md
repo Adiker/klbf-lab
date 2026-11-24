@@ -19,6 +19,7 @@
   <a href="#whats-inside">What's inside</a> •
   <a href="#build-and-run">Build and run</a> •
   <a href="#results">Results</a> •
+  <a href="#testers-wanted">Testers wanted</a> •
   <a href="#rules">Rules</a> •
   <a href="#credits">Credits</a>
 </p>
@@ -95,7 +96,17 @@ Every run we made, with build and result: **[docs/klbf/results.md](docs/klbf/res
 The same numbers are posted to the projects' own threads ([VIctory #59](https://github.com/Marvisak/VIctory/issues/59),
 [XCL #560](https://github.com/ivall/xcl/issues/560), [Palmwave #2](https://github.com/fablinoo/palmwave/issues/2)).
 
-Got another GPU? Run the same build and open an issue with your numbers. AMD, NVIDIA and Intel results are all welcome.
+## Testers wanted
+
+We're looking for **testers**, not chatters. Any GPU: AMD, NVIDIA or Intel.
+
+1. Build the `klbf-lab` branch from source, with your own copy of the game.
+2. Run it with `docs/klbf/run-test.ps1`.
+3. [Open an issue](https://github.com/PastiiJay/klbf-lab/issues/new) with your GPU, driver, build commit, how many seconds it ran and the last error lines of the log. Text only.
+
+> [!NOTE]
+> **We have no game files and will never share any. Please don't ask.**
+> **There is no Discord.** Everything happens here on GitHub, in issues and pull requests. Any server claiming to be KLBF Lab is not us.
 
 ## Rules
 
