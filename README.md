@@ -1,10 +1,10 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
 <h1 align="center">KLBF Lab 26 — AMD test branch</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/branch-klbf--amd-ff5fa2" alt="branch klbf-amd">
+  <img src="https://img.shields.io/badge/test-Lab%2026-ff7a00" alt="test: Lab 26">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-c04fb0" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
-  <img src="https://img.shields.io/badge/stable-4.4%20fps-2ea44f" alt="4.4 fps stable">
+  <img src="https://img.shields.io/badge/stable-4.4%20fps-ff7a00" alt="4.4 fps stable">
 </p>
 
 This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (`578d459`, see [README.fxceless.md](README.fxceless.md); all rendering work there is its author's) and adds fixes found on an RX 9070 XT. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab).
