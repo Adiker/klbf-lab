@@ -42,37 +42,48 @@ our test numbers go back to every project.
 
 ## Status
 
-**Not playable.** On our AMD card, KLBF Lab goes the furthest of every build we have tested so far.
+**Not playable.** The progress below comes from the VIctory community's open pull requests: they are not merged
+yet, and once they are, official VIctory will do the same. We build them together, test them on an AMD card and
+report the numbers back.
 
-| Stage | Official VIctory `main` | **KLBF Lab** |
+What VIctory `main` does on our card, and what it does with the open pull requests listed under
+[What's inside](#whats-inside):
+
+| Stage | VIctory `main` | `main` + the open pull requests below |
 |---|---|---|
-| Boot, first-boot screens, intro video, start screen | ✅ 30 fps | ✅ 30 fps |
-| Loading into the world (~50 s) | ✅ | ✅ |
-| The world (opening scene) | ⚠️ reached, removed after 3–4 s (GPU timeout) | ✅ plays through with audio and subtitles, ~1 fps |
-| Gameplay | ❌ | ✅ **reached and controllable with a pad** (input, rumble, pause menu); run stopped by us after **1,006 s with no device removal** |
-| A picture of the world | ❌ dark | ❌ still dark or blank |
-| Where it stops | GPU timeout (TDR) | not seen yet in 1,006 s |
-| Speed | – | menus 10–93 fps; the world ~1 fps (GPU ~10 % busy: the host-side copies are the bottleneck) |
+| Boot, first-boot screens, intro video, start screen | 30 fps | 30 fps |
+| Loading into the world (~50 s) | works | works |
+| The world (opening scene) | reached; GPU timeout after 3–4 s | plays through with audio and subtitles, ~1 fps |
+| Gameplay | not reached | reached and controllable with a pad (input, rumble, pause menu); 1,006 s with no device removal, stopped by us |
+| A picture of the world | dark | still dark or blank |
+| Speed in the world | – | ~1 fps; GPU ~10 % busy, host-side copies are the bottleneck |
 
-Tested on one machine: Windows 11, **AMD Radeon RX 9070 XT** (RDNA4), Ryzen 7 9800X3D, 32 GB.
+Tested on one machine: Windows 11, AMD Radeon RX 9070 XT (RDNA4), Ryzen 7 9800X3D, 32 GB.
 
 ## What's inside
 
-KLBF Lab is a fork of [VIctory](https://github.com/Marvisak/VIctory). The `klbf-lab` branch is official VIctory
-plus these open pull requests, merged as they stood when we tested them:
+KLBF Lab is a fork of [VIctory](https://github.com/Marvisak/VIctory). The `klbf-lab` branch is VIctory `main`
+plus the following.
 
-| From | Fix | Author's PR | Effect on our card |
+### From the VIctory community (open pull requests, merged as they stood when we tested them)
+
+| Pull request | Author | What it does | What we measured on AMD |
 |---|---|---|---|
-| VIctory | Shader spin-wait / loop limits in release builds | [#452](https://github.com/Marvisak/VIctory/pull/452) | ends the 2 s GPU timeout when entering the world |
-| VIctory | Free host textures only after running submissions | [#431](https://github.com/Marvisak/VIctory/pull/431) | removes the "inside freed" page faults |
-| VIctory | CopyTextureRegion texture-to-buffer readbacks | [#67](https://github.com/Marvisak/VIctory/pull/67) | part of the stack above |
-| VIctory | Clamp `ResourceDescriptorHeap` / `SamplerDescriptorHeap` indices | [#584](https://github.com/Marvisak/VIctory/pull/584) (limit raised to our 1,507,328-slot view heap) | removes the read far past the end of the view heap (`slot 125829120`) |
-| VIctory | Bind root SRVs as one-view tables bounded to their host copy | [#493](https://github.com/Marvisak/VIctory/pull/493) | removes the following low-address page fault; with #584: **483 s, no crash** |
-| KLBF Lab | `VICTORY_KEYS` also works with a pad connected | ours (same idea as [#197](https://github.com/Marvisak/VIctory/pull/197)) | scripted test runs |
-| KLBF Lab | Window caption reads "KLBF Lab (VIctory)" | ours | no confusion with official builds |
+| [#452](https://github.com/Marvisak/VIctory/pull/452) | AntoninMichelq | shader spin-wait / loop limits in release builds | ends the 2 s GPU timeout when entering the world |
+| [#431](https://github.com/Marvisak/VIctory/pull/431) | AntoninMichelq | frees host textures only after running submissions | removes the "inside freed" page faults |
+| [#67](https://github.com/Marvisak/VIctory/pull/67) | alessiodeia | CopyTextureRegion texture-to-buffer readbacks | part of the same stack |
+| [#584](https://github.com/Marvisak/VIctory/pull/584) | FibbS6 | clamps descriptor heap indices | removes the read far past the end of the view heap |
+| [#493](https://github.com/Marvisak/VIctory/pull/493) | hophaver | binds root SRVs as bounded one-view tables | with #584, removes the next page fault (1,006 s, no removal) |
 
-Tested and **not** kept (no gain on our card): [#688](https://github.com/Marvisak/VIctory/pull/688). [#493](https://github.com/Marvisak/VIctory/pull/493) alone did nothing; it only helps together with #584. XCL and Palmwave are tested too, see
-[docs/klbf/xcl-palmwave.md](docs/klbf/xcl-palmwave.md).
+Tested and not kept on our card: [#688](https://github.com/Marvisak/VIctory/pull/688), [#641](https://github.com/Marvisak/VIctory/pull/641) (brings the #493 fault back), [#955](https://github.com/Marvisak/VIctory/pull/955) (same result as #584 here). XCL and Palmwave are tested too, see [docs/klbf/xcl-palmwave.md](docs/klbf/xcl-palmwave.md).
+
+### Our own small changes
+
+| Change | Why |
+|---|---|
+| #584's index limit raised to 1,507,328 | the view heap on our AMD card is 1,245,184 + 2^18 dynamic slots, above #584's 1,000,000 |
+| `VICTORY_KEYS` also works with a pad connected (same idea as [#197](https://github.com/Marvisak/VIctory/pull/197)) | scripted test runs |
+| Window caption reads "KLBF Lab (VIctory)" | no confusion with official builds |
 
 ## Build and run
 
