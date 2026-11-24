@@ -1963,6 +1963,27 @@ mod tests {
         };
         copy(list, &crop_loc, 0, 0, 0, &tex_loc, &crop_box);
 
+        // 5) Console formats 118..=120 (3 B/texel) map to 4-byte PC formats
+        // (45..=47): skipped cleanly without breaking Close() or touching dst.
+        let mut dst_d16s8 = null;
+        assert_eq!(
+            create_committed(null, &PROPERTIES, 0, &buffer(1024), 0, null.cast(), iid, &mut dst_d16s8),
+            S_OK
+        );
+        let d16s8_loc = Location {
+            resource: dst_d16s8,
+            kind: 1,
+            footprint: PlacedFootprint {
+                offset: 0,
+                format: 118,
+                width: 4,
+                height: 4,
+                depth: 1,
+                row_pitch: 256,
+            },
+        };
+        copy(list, &d16s8_loc, 0, 0, 0, &tex_loc, std::ptr::null());
+
         assert_eq!(slot::<extern "system" fn(This) -> HRESULT>(list, 0x48)(list), S_OK);
         slot::<extern "system" fn(This, u32, *const This)>(queue, 0x50)(queue, 1, &list);
 
@@ -1995,6 +2016,12 @@ mod tests {
             let dst_at = row * 256;
             assert_eq!(cr[dst_at..dst_at + 8], up[src_at..src_at + 8], "crop row {row}");
         }
+
+        // Verify skipped 118..=120 readback left its buffer untouched.
+        let (d16_ptr, _) = buffer_bytes(dst_d16s8).unwrap();
+        // SAFETY: dst_d16s8 holds 1024 bytes.
+        let d16 = unsafe { std::slice::from_raw_parts(d16_ptr, 1024) };
+        assert!(d16.iter().all(|&b| b == 0), "mismatched format 118 buffer touched");
     }
 
     #[test]

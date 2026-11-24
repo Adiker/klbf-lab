@@ -519,6 +519,23 @@ extern "system" fn copy_texture_region(
             let Some((lines, row_bytes, total)) = dst.footprint.layout() else {
                 return;
             };
+            let host_format = crate::resource::pc_format(dst.footprint.format);
+            if crate::resource::element(host_format)
+                != crate::resource::element(dst.footprint.format)
+            {
+                // Console formats such as 118..=120 (3-byte D16S8) map to
+                // 4-byte PC substitutes (45..=47): raw readback would mis-size
+                // the staging buffer and write the wrong texel layout.
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| {
+                    tracing::warn!(
+                        format = dst.footprint.format,
+                        host_format,
+                        "texture-to-buffer readback skipped: host format has a different texel size",
+                    );
+                });
+                return;
+            }
             if total == 0 || lines == 0 || row_bytes == 0 {
                 return;
             }
@@ -552,7 +569,7 @@ extern "system" fn copy_texture_region(
             let mut to_location = dst;
             to_location.resource = buffer.as_raw().cast_const().cast();
             to_location.footprint.offset = 0;
-            to_location.footprint.format = crate::resource::pc_format(dst.footprint.format);
+            to_location.footprint.format = host_format;
             to_location.footprint.row_pitch = host_pitch;
             let mut from_location = src;
             from_location.resource = from_tex.as_raw().cast_const().cast();
