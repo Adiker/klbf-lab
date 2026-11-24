@@ -46,6 +46,10 @@ We learn from the best projects first, VIctory above all, then XCL, Palmwave, an
 
 **Every GPU.** Our own runs happen on an AMD card, but the goal is one build that works on every GPU: AMD, NVIDIA and Intel results are all welcome, and we try not to break any of them.
 
+## Try it yourself (AMD)
+
+The [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (VIctory + its own rendering fixes, all credit to its author) also draws the first gameplay scene on an **RX 9070 XT**, unchanged: about 1 fps on our machine, run with `VICTORY_D3D12_DRED=1`. Build it from source like VIctory, with your own copy of the game. Our numbers are in [docs/klbf/results.md](docs/klbf/results.md); please report yours in an issue (GPU, driver, how long it ran, last lines of `stderr.log`).
+
 ## Status
 
 **Not playable.** The progress below comes from the community's open pull requests and from the AnyXboxX
