@@ -40,6 +40,10 @@ learn. Every project solves different problems. So we **pick the fixes that real
 they come from**, combine them in one build, measure it and credit the people who wrote them. We don't take sides:
 our test numbers go back to every project.
 
+### Why a fork, and not just a branch
+
+We learn from the best projects first, VIctory above all, then XCL, Palmwave, and emulator write-ups like Xenia's and shadPS4's. But testing on one AMD card kept raising questions that no single upstream pull request answers: why the world stays black, why the GPU sits mostly idle, why one CPU thread is saturated. Answering them means trying things in a slightly different direction, measuring them, and sometimes throwing them away. That needed a place of its own, with its own build, its own test log and its own experiments, more than a branch in someone else's repository. Whatever works goes back upstream, with numbers.
+
 ## Status
 
 **Not playable.** The progress below comes from the VIctory community's open pull requests: they are not merged
