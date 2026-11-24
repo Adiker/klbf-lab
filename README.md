@@ -1,5 +1,5 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab — AMD test branch</h1>
+<h1 align="center">KLBF Lab 26 — AMD test branch</h1>
 <p align="center">
   <img src="https://img.shields.io/badge/branch-klbf--amd-ff5fa2" alt="branch klbf-amd">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-c04fb0" alt="tested on RX 9070 XT">
