@@ -25,7 +25,7 @@ use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::core::s;
 
-use crate::host::{HostList, host, transition};
+use crate::host::{BUFFER_READ, HostList, host, transition};
 
 const SOURCE: &str = r#"
 #define RS "RootConstants(num32BitConstants=6, b0), SRV(t0), SRV(t1), UAV(u0), UAV(u1)"
@@ -265,6 +265,7 @@ pub(crate) fn bound(
 ) -> Option<ID3D12Resource> {
     let bytes = validate_layout(spec, src.1, count.map(|(_, off)| off))?;
     let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
+    sources_read(list, src, count);
     record_clamp(c, &list.list, &dst, budget, src, count, spec).then_some(dst)
 }
 
@@ -285,7 +286,18 @@ pub(crate) fn bound_ahead(
 ) -> Option<ID3D12Resource> {
     let bytes = validate_layout(spec, src.1, None)?;
     let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
+    sources_read(list, src, None);
     record_clamp_as(c, &list.list, &dst, budget, src, None, spec, true).then_some(dst)
+}
+
+/// The clamp is a command of its own that reads the title's arguments and
+/// count from their host copies (upstream VIctory #334's state tracking).
+fn sources_read(list: &HostList, src: (&ID3D12Resource, u64), count: Option<(&ID3D12Resource, u64)>) {
+    list.begin_command();
+    list.buffer_state(src.0, BUFFER_READ);
+    if let Some((c, _)) = count {
+        list.buffer_state(c, BUFFER_READ);
+    }
 }
 
 fn record_clamp(
@@ -358,8 +370,8 @@ fn record_clamp_as(
     };
     let constants = [kind, stride, records, args_offset, has_count | (u32::from(ahead) << 1), count_offset];
     // SAFETY: an open list; our root signature and pipeline; live source,
-    // count, scratch destination, and budget buffers. `src` and `count` stay
-    // in `COMMON` / `GENERIC_READ` via implicit buffer promotion while `dst`
+    // count, scratch destination, and budget buffers. `src` and `count` are
+    // in `GENERIC_READ` (`sources_read`, host lists) while `dst`
     // transitions `COMMON -> UNORDERED_ACCESS -> INDIRECT_ARGUMENT`.
     // Diagnostics: counted; `VICTORY_BARRIER_TEST=indirect` leaves the two
     // waits for every earlier shader write out (the state changes stay).
