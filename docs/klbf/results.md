@@ -5,6 +5,7 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 
 | Date (UTC) | Project | Build | Result |
 |---|---|---|---|
+| 2026-11-24 18:42 | Lab 18 | Lab 15 + fewer write-watch calls (one call over busy pages) | 1,503 s, stopped by script, no device removal; ~1,025 ms/frame in the world (92 samples); watch time unchanged (~420–450 ms/frame): no gain |
 | 2026-11-24 18:17 | Lab 17 | Lab 15 + #1250 + #1230 (zero element counts, missing-value reachability) | 1,504 s, stopped by script, no device removal; ~1,017 ms/frame in the world (91 samples); picture unchanged (still mostly black) |
 | 2026-11-24 17:50 | Lab 16 | Lab 15 + #1215 | 1,503 s, stopped by script, no device removal; ~1,000 ms/frame in the world (89 samples): no speed or picture change |
 | 2026-11-24 16:23 | **KLBF Lab 15** | AnyXboxX integration + #431 + #67, `VICTORY_SHADER_LOOP_LIMIT=1024`, `VICTORY_CAPPED_DYNAMIC=262144` | **1,503 s, stopped by script, no device removal**; ~1,030 ms/frame in the world; partial world geometry visible |
