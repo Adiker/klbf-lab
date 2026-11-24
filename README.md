@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/branch-klbf--amd-ff5fa2" alt="branch klbf-amd">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-c04fb0" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
-  <img src="https://img.shields.io/badge/in%20game-5.4%20fps-2ea44f" alt="5.4 fps in game">
+  <img src="https://img.shields.io/badge/stable-4.4%20fps-2ea44f" alt="4.4 fps stable">
 </p>
 
 This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (`578d459`, see [README.fxceless.md](README.fxceless.md); all rendering work there is its author's) and adds fixes found on an RX 9070 XT. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab).
@@ -25,14 +25,15 @@ No game files are included. You need your own legally obtained copy.
 | | Result |
 |---|---|
 | First gameplay scene | drawn, room fully lit by ambient light |
-| Speed, recommended settings | ~5.4 fps (≈185 ms/frame); one run ended with a device removal after ~11 min; without card buffers ~4.4 fps |
+| Speed, stable settings | ~4.4 fps (≈220–230 ms/frame), no device removal in our run |
+| Speed with card buffers (unstable) | ~5.4 fps (≈185 ms/frame), but the device was removed after ~11 min |
 | Speed, fast settings (experimental) | 6–9 fps, but the device was removed after ~3 min |
 | Longest session (earlier build of the same fixes) | ~28 min, first mission up to the robbery |
 | Still wrong | ambient light comes out purple (its green channel is lost), triangle edges visible on lit surfaces, character faces too dark, white eyes, some invisible skin, some missing walls further in, very bright scenes over-exposed |
 
 ## Run
 
-Build like VIctory (`cargo build --release`). Stable settings:
+Build like VIctory (`cargo build --release`). Stable settings (remove the two `CARD_BUFFERS` lines; with them: ~5.4 fps but unstable):
 
 ```powershell
 $env:VICTORY_LATE_WAIT = '1'
