@@ -600,18 +600,16 @@ pub(crate) struct Plane {
 }
 const _: () = assert!(size_of::<Plane>() == 0x30);
 
-/// The plane and resource shown: `VICTORY_PRESENT_PLANE=P` or `P:R`
-/// (default 0:0, the first plane's first resource). A title may present
-/// more than one plane (a game plane and an overlay one) and leave the
-/// composition to the console.
-// ponytail: one plane shown, no composition; blend the planes if a title
-// is seen to need both.
-fn shown_plane() -> (usize, usize) {
-    static SHOWN: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
+/// The one plane and resource shown, for debugging:
+/// `VICTORY_PRESENT_PLANE=P` or `P:R`. Unset: every plane's resources, in
+/// submission order, drawn one over the other as the console composes them
+/// (a title may present a game plane and an overlay one).
+fn shown_plane() -> Option<(usize, usize)> {
+    static SHOWN: std::sync::OnceLock<Option<(usize, usize)>> = std::sync::OnceLock::new();
     *SHOWN.get_or_init(|| {
-        let v = std::env::var("VICTORY_PRESENT_PLANE").unwrap_or_default();
+        let v = std::env::var("VICTORY_PRESENT_PLANE").ok()?;
         let (p, r) = v.split_once(':').unwrap_or((&v, "0"));
-        (p.trim().parse().unwrap_or(0), r.trim().parse().unwrap_or(0))
+        Some((p.trim().parse().unwrap_or(0), r.trim().parse().unwrap_or(0)))
     })
 }
 
@@ -644,6 +642,12 @@ fn log_planes(planes: &[Plane]) {
                 // SAFETY: when given, one rectangle per resource.
                 let [l, t, rr, b] = unsafe { *plane.source_rects.add(r) };
                 text += &format!(" from ({l},{t})-({rr},{b})");
+            }
+            if !plane.placements.is_null() {
+                // SAFETY: when given, one placement per resource (read as
+                // four words; see `crate::host::Layer::place`).
+                let words = unsafe { *plane.placements.cast::<[u32; 4]>().add(r) };
+                text += &format!(" to {:?} ({words:#x?})", words.map(f32::from_bits));
             }
             text += "; ";
         }
@@ -814,11 +818,12 @@ pub(crate) fn presented() -> u64 {
     FRAMES.load(Ordering::Relaxed)
 }
 
-/// Shows one plane's resource in our window ([`shown_plane`], the first
-/// plane's first by default).
+/// Shows the planes in our window: each plane's resources, in submission
+/// order, scaled from their source rectangles into their placements and
+/// drawn one over the other ([`crate::host::Host::present`]); or the one
+/// [`shown_plane`] names.
 ///
-/// shortcut: one plane, no scaling or placement, the source expected in
-/// the common state.
+/// shortcut: the planes' colour spaces and flags are logged, not used.
 extern "system" fn present(
     _: This,
     planes: u32,
@@ -889,25 +894,60 @@ extern "system" fn present(
     #[cfg(windows)]
     log_planes(all);
     #[cfg(windows)]
-    let (shown, index) = shown_plane();
-    #[cfg(windows)]
-    if let Some(plane) = all.get(shown).or(all.first())
-        && plane.count > 0
-        && !plane.resources.is_null()
-        // SAFETY: the plane lists `count` resources.
-        && let resource = unsafe { *plane.resources.add(index.min(plane.count as usize - 1)) }
-        && let Some(texture) = crate::resource::host_resource(resource)
-        && let Some(host) = crate::host::host()
-    {
+    if let Some(host) = crate::host::host() {
+        // The one resource asked for (the first plane's if there is no such
+        // plane, its last if no such resource), or all of them.
+        let only = shown_plane().map(|(p, r)| {
+            let p = if p < all.len() { p } else { 0 };
+            (p, r.min(all.get(p).map_or(0, |plane| plane.count.max(1) as usize - 1)))
+        });
         const COPY_SOURCE: u32 = 0x800;
-        let state = crate::resource::host_transition(resource, COPY_SOURCE)
-            .map_or(COPY_SOURCE, |(_, before)| before);
-        let shown = host.present(texture, state, frame);
-        crate::resource::host_transition(resource, state);
-        #[cfg(feature = "diagnostics")]
-        blinks(frame, resource, state, shown);
-        #[cfg(not(feature = "diagnostics"))]
-        let _ = shown;
+        let mut shown_resources = Vec::new();
+        let mut layers = Vec::new();
+        for (p, plane) in all.iter().enumerate() {
+            if plane.resources.is_null() {
+                continue;
+            }
+            for r in 0..plane.count as usize {
+                if only.is_some_and(|o| o != (p, r)) {
+                    continue;
+                }
+                // SAFETY: the plane lists `count` resources, and as many
+                // source rectangles and placements when it gives them.
+                let (resource, source, place) = unsafe {
+                    (
+                        *plane.resources.add(r),
+                        (!plane.source_rects.is_null()).then(|| *plane.source_rects.add(r)),
+                        (!plane.placements.is_null())
+                            .then(|| *plane.placements.cast::<[f32; 4]>().add(r)),
+                    )
+                };
+                let Some(texture) = crate::resource::host_resource(resource) else {
+                    continue;
+                };
+                // The tracked state is the copy source's while it is shown;
+                // the present moves it from the state it was in, and back.
+                let state = crate::resource::host_transition(resource, COPY_SOURCE)
+                    .map_or(COPY_SOURCE, |(_, before)| before);
+                shown_resources.push((resource, state));
+                layers.push(crate::host::Layer {
+                    texture,
+                    state,
+                    source,
+                    place,
+                });
+            }
+        }
+        if !layers.is_empty() {
+            let shown = host.present(&layers, frame);
+            for &(resource, state) in shown_resources.iter().rev() {
+                crate::resource::host_transition(resource, state);
+            }
+            #[cfg(feature = "diagnostics")]
+            blinks(frame, shown_resources[0].0, shown_resources[0].1, shown);
+            #[cfg(not(feature = "diagnostics"))]
+            let _ = shown;
+        }
     }
     #[cfg(not(windows))]
     let _ = (planes, plane_parameters);
