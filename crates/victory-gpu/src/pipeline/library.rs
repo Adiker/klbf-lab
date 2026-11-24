@@ -50,7 +50,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard, OnceLock, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::core::{HSTRING, Interface, PCWSTR};
@@ -437,19 +437,44 @@ const EARLY_FILE: &str = "early-pipelines.txt";
 /// Title pipelines listed for an early start, at most.
 const EARLY_MAX: usize = 8192;
 
-fn library() -> Option<&'static Library> {
-    static LIBRARY: OnceLock<Option<Library>> = OnceLock::new();
+/// The library, opened on first use (`None` inside: not opened yet).
+static LIBRARY: Mutex<Option<Option<Arc<Library>>>> = Mutex::new(None);
+
+fn library() -> Option<Arc<Library>> {
     LIBRARY
-        .get_or_init(|| {
-            let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
-            let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
-            let library = open(&device, blob);
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get_or_insert_with(|| {
+            let library = open_from_disk();
             if library.is_none() {
                 tracing::warn!("no host pipeline library: pipelines are not kept");
             }
             library
         })
-        .as_ref()
+        .clone()
+}
+
+fn open_from_disk() -> Option<Arc<Library>> {
+    let device = crate::host::host()?.device.cast::<ID3D12Device1>().ok()?;
+    let blob = DIR.get().map_or(Blob::None, |d| Blob::of(d));
+    open(&device, blob).map(Arc::new)
+}
+
+/// Saves the library, then opens it again from the file just written: the
+/// pipelines stored into it are let go (a library holds every pipeline
+/// stored into it until it is released: the pre-build's thousands). Only
+/// with no library call under way that stores into it (the pre-build
+/// pauses its workers).
+pub(crate) fn save_and_reopen() {
+    save(true);
+    let mut library = LIBRARY.lock().unwrap_or_else(|e| e.into_inner());
+    if matches!(&*library, Some(Some(_))) {
+        // The old one first: its file mapping goes with it (and `trim`'s
+        // view of it until the new one is mapped).
+        VIEW[0].store(0, Ordering::Relaxed);
+        *library = None;
+        *library = Some(open_from_disk());
+    }
 }
 
 /// The library in `blob`, or an empty one if the host rejects the blob (an
