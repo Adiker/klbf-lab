@@ -278,6 +278,8 @@ impl Shader {
 
     /// A descriptor heap handle, annotated with `props`; `nonuniform` when
     /// the index may differ between lanes (`NonUniformResourceIndex`).
+    /// Out-of-range indices are clamped to slot 0 (from #584) so a garbage index cannot
+    /// page-fault the host GPU past the heap's end.
     pub fn heap_handle(
         &mut self,
         block: usize,
@@ -292,6 +294,11 @@ impl Shader {
             flags::RESOURCE_HEAP
         };
         self.nonuniform_handles += u32::from(nonuniform);
+        // ponytail: fixed limits (view heap 1,245,184 + 2^18 dynamic = 1,507,328 on our AMD host); pass the real heap size if this stays.
+        let limit = self.m.i32(if sampler { 2048 } else { 1_507_328 });
+        let zero = self.m.i32(0);
+        let in_bounds = self.m.cmp(block, super::bitcode::pred::IULT, index, limit);
+        let index = self.m.select(block, in_bounds, index, zero);
         let (s, n) = (self.m.bool(sampler), self.m.bool(nonuniform));
         let h = self.op(
             block,
