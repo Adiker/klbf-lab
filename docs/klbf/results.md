@@ -5,6 +5,8 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 
 | Date (UTC) | Project | Build | Result |
 |---|---|---|---|
+| 2026-11-24 13:14 | **KLBF Lab 03** | **+ #584 + #493** | **483 s, stopped by us, no device removal; gameplay reached (control prompts)** |
+| 2026-11-24 13:11 | KLBF Lab 02 | + #584 | 160 s, device removed: page fault at a low address (`0x29f4000`) in a compute dispatch |
 | 2026-11-24 12:54 | KLBF Lab | + #493 (bounded root SRVs) | 147 s, device removed: read far past the end of the view heap (`0x1f00f0000`) |
 | 2026-11-24 12:43 | Palmwave | `5a54236` | stops at 6 s, `0x887a0020` (×2, also with `XCL_PSO_DISK_CACHE=0`) |
 | 2026-11-24 12:38 | KLBF Lab | + #688 (dynamic slots on a capped heap) | 144 s, device removed, page fault |

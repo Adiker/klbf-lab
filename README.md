@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/Marvisak/VIctory"><img src="https://img.shields.io/badge/based%20on-VIctory-1f46c8" alt="based on VIctory"></a>
   <img src="https://img.shields.io/badge/tested%20on-AMD%20RX%209070%20XT-c04fb0" alt="tested on RX 9070 XT">
-  <img src="https://img.shields.io/badge/record-221%20s%20(160%20s%20in%20the%20world)-ffb000" alt="record">
+  <img src="https://img.shields.io/badge/record-483%20s%20without%20a%20crash-ffb000" alt="record">
   <img src="https://img.shields.io/badge/license-GPL--3.0-2ea44f" alt="GPL-3.0">
 </p>
 
@@ -48,9 +48,10 @@ our test numbers go back to every project.
 |---|---|---|
 | Boot, first-boot screens, intro video, start screen | ✅ 30 fps | ✅ 30 fps |
 | Loading into the world (~50 s) | ✅ | ✅ |
-| The world (opening scene) | ⚠️ reached, removed after 3–4 s (GPU timeout) | ✅ **~160 s** with audio, subtitles and title cards, ~1 fps |
+| The world (opening scene) | ⚠️ reached, removed after 3–4 s (GPU timeout) | ✅ plays through with audio and subtitles, ~1 fps |
+| Gameplay (player control prompts) | ❌ | ✅ **reached**, run stopped by us at 483 s with no device removal |
 | A picture of the world | ❌ dark | ❌ still dark or blank |
-| Where it stops | GPU timeout (TDR) | a read far past the end of the descriptor heap |
+| Where it stops | GPU timeout (TDR) | not seen yet in 483 s |
 
 Tested on one machine: Windows 11, **AMD Radeon RX 9070 XT** (RDNA4), Ryzen 7 9800X3D, 32 GB.
 
@@ -64,11 +65,12 @@ plus these open pull requests, merged as they stood when we tested them:
 | VIctory | Shader spin-wait / loop limits in release builds | [#452](https://github.com/Marvisak/VIctory/pull/452) | ends the 2 s GPU timeout when entering the world |
 | VIctory | Free host textures only after running submissions | [#431](https://github.com/Marvisak/VIctory/pull/431) | removes the "inside freed" page faults |
 | VIctory | CopyTextureRegion texture-to-buffer readbacks | [#67](https://github.com/Marvisak/VIctory/pull/67) | part of the stack above |
+| VIctory | Clamp `ResourceDescriptorHeap` / `SamplerDescriptorHeap` indices | [#584](https://github.com/Marvisak/VIctory/pull/584) (limit raised to our 1,507,328-slot view heap) | removes the read far past the end of the view heap (`slot 125829120`) |
+| VIctory | Bind root SRVs as one-view tables bounded to their host copy | [#493](https://github.com/Marvisak/VIctory/pull/493) | removes the following low-address page fault; with #584: **483 s, no crash** |
 | KLBF Lab | `VICTORY_KEYS` also works with a pad connected | ours (same idea as [#197](https://github.com/Marvisak/VIctory/pull/197)) | scripted test runs |
 | KLBF Lab | Window caption reads "KLBF Lab (VIctory)" | ours | no confusion with official builds |
 
-Tested and **not** kept (no gain on our card): [#688](https://github.com/Marvisak/VIctory/pull/688),
-[#493](https://github.com/Marvisak/VIctory/pull/493). XCL and Palmwave are tested too, see
+Tested and **not** kept (no gain on our card): [#688](https://github.com/Marvisak/VIctory/pull/688). [#493](https://github.com/Marvisak/VIctory/pull/493) alone did nothing; it only helps together with #584. XCL and Palmwave are tested too, see
 [docs/klbf/xcl-palmwave.md](docs/klbf/xcl-palmwave.md).
 
 ## Build and run
