@@ -5,8 +5,7 @@ Every KLBF Lab version, newest first. Measured on one machine: Windows 11, AMD R
 Product and controller names (Xbox, DualSense…) are only used to say what a build works with. They belong to their owners; KLBF Lab is not affiliated with or endorsed by them.
 
 ## 🧪 Brewing
-- **Lab 24**: find and stop the memory growth seen in Lab 23, so a run lasts.
-- **Lab 25**: our shader fixes on top of Lab 23, for more fps; plus keyboard and mouse controls and DualSense controller support if they fit.
+- **v8**: latest fxceless/victory-fork (shader clean-up passes) + our AMD fixes; candidate fix for the purple ambient light (upstream #1696); speed: fork #95 and #71; Series S + FSR (fork #32, #86); ahead-of-time shader compilation.
 
 ## AMD test branch `klbf-amd` — 24 Nov 2026
 - **Base:** fxceless/victory-gta6 `578d459` + VIctory #1599.
