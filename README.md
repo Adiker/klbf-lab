@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/branch-klbf--amd-ff5fa2" alt="branch klbf-amd">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-c04fb0" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
-  <img src="https://img.shields.io/badge/in%20game-4.4%20fps%20stable-2ea44f" alt="4.4 fps in game, stable">
+  <img src="https://img.shields.io/badge/in%20game-5.4%20fps%20stable-2ea44f" alt="5.4 fps in game, stable">
 </p>
 
 This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (`578d459`, see [README.fxceless.md](README.fxceless.md); all rendering work there is its author's) and adds fixes found on an RX 9070 XT. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab).
@@ -25,7 +25,7 @@ No game files are included. You need your own legally obtained copy.
 | | Result |
 |---|---|
 | First gameplay scene | drawn, room fully lit by ambient light |
-| Speed, stable settings | ~4.4 fps (≈225 ms/frame), no device removal, committed memory flat |
+| Speed, stable settings | ~5.4 fps (≈185 ms/frame), no device removal, committed memory flat |
 | Speed, fast settings (experimental) | 6–9 fps, but the device was removed after ~3 min |
 | Longest session (earlier build of the same fixes) | ~28 min, first mission up to the robbery |
 | Still wrong | ambient light comes out purple (its green channel is lost), triangle edges visible on lit surfaces, character faces too dark, white eyes, some invisible skin, some missing walls further in, very bright scenes over-exposed |
@@ -35,13 +35,14 @@ No game files are included. You need your own legally obtained copy.
 Build like VIctory (`cargo build --release`). Stable settings:
 
 ```powershell
-$env:VICTORY_D3D12_DRED = '1'
 $env:VICTORY_LATE_WAIT = '1'
 $env:VICTORY_WIDE_BACK = '1'
+$env:VICTORY_CARD_BUFFERS_MIN_MB = '1'
+$env:VICTORY_CARD_BUFFERS_MB = '1024'
 target\release\victory.exe run <game dir>\<the title's exe> --execute
 ```
 
-Fast settings (experimental, crashed after ~3 min here): add `VICTORY_LATE_WAIT=3`, `VICTORY_CARD_BUFFERS_MIN_MB=1`, `VICTORY_CARD_BUFFERS_MB=1024`.
+Fast settings (experimental, crashed after ~3 min here): `VICTORY_LATE_WAIT=3` instead of 1. DRED (`VICTORY_D3D12_DRED`) made no speed difference here.
 
 If the AMD shader compiler crashes (`amdxc64.dll`), add the 41 `CS_RaytracingResolve` hashes from [fxceless #3](https://github.com/fxceless/victory-gta6/issues/3) to `VICTORY_SKIP_PIPELINES` (comma-separated, keep `39f0e9aeb156a61c`). The first launch compiles shaders for several minutes; later launches reuse them. Keep the game's high-contrast option off for real colours.
 
