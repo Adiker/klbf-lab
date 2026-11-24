@@ -48,7 +48,7 @@ We learn from the best projects first, VIctory above all, then XCL, Palmwave, an
 
 ## Try it yourself (AMD)
 
-The [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (VIctory + its own rendering fixes, all credit to its author) also draws the first gameplay scene on an **RX 9070 XT**, unchanged: about 1 fps on our machine, run with `VICTORY_D3D12_DRED=1`. Build it from source like VIctory, with your own copy of the game. Our numbers are in [docs/klbf/results.md](docs/klbf/results.md); please report yours in an issue (GPU, driver, how long it ran, last lines of `stderr.log`).
+The [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (VIctory + its own rendering fixes, all credit to its author) also draws the first gameplay scene on an **RX 9070 XT**, unchanged: about 2 fps on our machine after warm-up, no device removal, run with `VICTORY_D3D12_DRED=1`. It needs a lot of memory: with 32 GB of RAM our run stopped after 8.5 min when memory ran out, so a large page file helps. Build it from source like VIctory, with your own copy of the game. Our numbers are in [docs/klbf/results.md](docs/klbf/results.md); please report yours in an issue (GPU, driver, how long it ran, last lines of `stderr.log`).
 
 ## Status
 
