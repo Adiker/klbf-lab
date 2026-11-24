@@ -5,6 +5,7 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 
 | Date (UTC) | Project | Build | Result |
 |---|---|---|---|
+| 2026-11-24 18:17 | Lab 17 | Lab 15 + #1250 + #1230 (zero element counts, missing-value reachability) | 1,504 s, stopped by script, no device removal; ~1,017 ms/frame in the world (91 samples); picture unchanged (still mostly black) |
 | 2026-11-24 17:50 | Lab 16 | Lab 15 + #1215 | 1,503 s, stopped by script, no device removal; ~1,000 ms/frame in the world (89 samples): no speed or picture change |
 | 2026-11-24 16:23 | **KLBF Lab 15** | AnyXboxX integration + #431 + #67, `VICTORY_SHADER_LOOP_LIMIT=1024`, `VICTORY_CAPPED_DYNAMIC=262144` | **1,503 s, stopped by script, no device removal**; ~1,030 ms/frame in the world; partial world geometry visible |
 | 2026-11-24 16:02 | AnyXboxX integration (unchanged) | `LooperSalty/victory` `anyxboxx/stable`, its launcher settings (loop limit 32) | **1,221 s, stopped by us, no device removal**; pad works; first world geometry visible on this card (with high-contrast accessibility on); ~1 fps |
