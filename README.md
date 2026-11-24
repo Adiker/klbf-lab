@@ -44,6 +44,8 @@ our test numbers go back to every project.
 
 We learn from the best projects first, VIctory above all, then XCL, Palmwave, and emulator write-ups like Xenia's and shadPS4's. But testing on one AMD card kept raising questions that no single upstream pull request answers: why the world stays black, why the GPU sits mostly idle, why one CPU thread is saturated. Answering them means trying things in a slightly different direction, measuring them, and sometimes throwing them away. That needed a place of its own, with its own build, its own test log and its own experiments, more than a branch in someone else's repository. Whatever works goes back upstream, with numbers.
 
+**AMD first, not AMD only.** AMD cards are usually the last ones these projects get tested on, so we test there first. But the goal is one build that works on every GPU: NVIDIA and Intel results are just as welcome, and nothing we keep may break them.
+
 ## Status
 
 **Not playable.** The progress below comes from the VIctory community's open pull requests: they are not merged
