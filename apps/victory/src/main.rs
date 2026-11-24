@@ -5,6 +5,8 @@
 
 mod census;
 mod inspect;
+#[cfg(windows)]
+mod prebuild;
 mod run;
 mod shader;
 mod translate;
@@ -142,6 +144,11 @@ enum Command {
         /// `VICTORY_VIEW_LIMIT` to what the run's log says of the host.
         #[arg(long)]
         warm: Option<PathBuf>,
+        /// With --pipelines: fill the shader cache and host pipeline
+        /// library `run` reads with every pipeline of the title's shader
+        /// pack (resumable; honours VICTORY_SKIP_PIPELINES).
+        #[arg(long, requires = "pipelines", conflicts_with_all = ["validate", "list"])]
+        cache: bool,
     },
     /// Translate the shaders of a title's archives into the cache and make
     /// their compute pipelines, so that a run finds them there.
@@ -241,6 +248,13 @@ fn main() -> Result<()> {
             verbose,
             disasm,
         } => shader::run(paths, verbose || disasm, disasm),
+        #[cfg(windows)]
+        Command::Translate {
+            paths,
+            jobs,
+            cache: true,
+            ..
+        } => prebuild::run(paths, jobs),
         Command::Translate {
             paths,
             validate,
@@ -248,6 +262,7 @@ fn main() -> Result<()> {
             list,
             jobs,
             warm,
+            ..
         } => {
             // `VICTORY_VIEW_LIMIT=<null slot>`: translate as on a host whose view heap is capped
             if let Some(n) = std::env::var("VICTORY_VIEW_LIMIT").ok().and_then(|v| v.parse().ok()) {
