@@ -5,6 +5,11 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 
 | Date (UTC) | Project | Build | Result |
 |---|---|---|---|
+| 2026-11-24 14:37 | Lab 08 | Lab 03 with #955 instead of #584 | no visible change (world still blank/black at ~1 fps); closed by us |
+| 2026-11-24 14:20 | Lab 07 | Lab 03 + #393 + #388 + #230 (host copy work) | 433 s, no device removal; still ~1 fps: bytes *checked* per frame 11.4 → 7.1 GB, but ~10 GB per frame are still *refreshed* (copied) |
+| 2026-11-24 14:17 | Lab 03 + `VICTORY_SHADER_LOOP_LIMIT=64` | – | no speed-up on this card (GPU 3–7 % busy); device removed at 161 s (low-address page fault) |
+| 2026-11-24 13:50 | Lab 05 | Lab 03 + #641 | 254 s, low-address page fault in compute `37e19ccb4f889f63`: #641 brings back the fault #493 removed |
+| 2026-11-24 13:46 | Lab 04 | Lab 03 + #641 + #393 | 184 s, same low-address page fault |
 | 2026-11-24 13:30 | **KLBF Lab 03** | same, no scripted keys, XInput pad | **1,006 s, stopped by us, no device removal**; pad input and rumble work, mission objectives advance; world still black at ~1 fps (6,500 draws/frame), menus 10–93 fps; 16.5 GB working set, GPU ~10 % busy |
 | 2026-11-24 13:14 | **KLBF Lab 03** | **+ #584 + #493** | **483 s, stopped by us, no device removal; gameplay reached (control prompts)** |
 | 2026-11-24 13:11 | KLBF Lab 02 | + #584 | 160 s, device removed: page fault at a low address (`0x29f4000`) in a compute dispatch |
