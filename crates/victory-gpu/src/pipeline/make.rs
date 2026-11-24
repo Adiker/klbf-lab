@@ -31,7 +31,7 @@ pub(crate) struct Pending {
     made: OnceLock<Option<HostPipeline>>,
     /// What identifies it across runs (shader containers and state), and
     /// whether a draw or dispatch has requested it yet.
-    key: String,
+    pub(crate) key: String,
     used: AtomicBool,
 }
 
