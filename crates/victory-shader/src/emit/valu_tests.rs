@@ -939,6 +939,9 @@ fn v_cmp_class_f16_matches_rdna2() {
             "{backend}: v_cmp_class_f16(-hi({:#010x}), {:#05x}) = {got}, want {want}",
             inp[0], inp[1],
         );
+    });
+}
+
 /// A descriptor at a heap address the program's data computes (the table
 /// address plus an index, as bindless code adds one it loads). Stale data
 /// gives any index; one past the host heap is undefined: NVIDIA wraps it
