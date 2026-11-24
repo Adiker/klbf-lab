@@ -5,6 +5,7 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 
 | Date (UTC) | Project | Build | Result |
 |---|---|---|---|
+| 2026-11-24 13:30 | **KLBF Lab 03** | same, no scripted keys, XInput pad | **1,006 s, stopped by us, no device removal**; pad input and rumble work, mission objectives advance; world still black at ~1 fps (6,500 draws/frame), menus 10–93 fps; 16.5 GB working set, GPU ~10 % busy |
 | 2026-11-24 13:14 | **KLBF Lab 03** | **+ #584 + #493** | **483 s, stopped by us, no device removal; gameplay reached (control prompts)** |
 | 2026-11-24 13:11 | KLBF Lab 02 | + #584 | 160 s, device removed: page fault at a low address (`0x29f4000`) in a compute dispatch |
 | 2026-11-24 12:54 | KLBF Lab | + #493 (bounded root SRVs) | 147 s, device removed: read far past the end of the view heap (`0x1f00f0000`) |
@@ -19,5 +20,6 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 | 2026-11-24 | XCL | `main` | stops ~100 s on the hang detector (`+0x23cf683`), 30–38 GB committed |
 
 Notes:
+- `VICTORY_KEYS` makes the keyboard stand-in pad the signed-in user's pad: a real pad then only reaches the pause button. Leave it unset to play with a pad.
 - Alt+Enter (fullscreen) freezes the picture in the world: stay windowed.
 - `VICTORY_D3D12_DRED=1` made runs clearly more stable on this card.
