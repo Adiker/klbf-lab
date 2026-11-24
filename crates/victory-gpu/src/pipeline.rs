@@ -756,6 +756,13 @@ pub fn save_pipeline_cache() {
     library::save(true);
 }
 
+/// [`save_pipeline_cache`], then the library opened again from the saved
+/// file, which lets go of every pipeline stored into it (the pre-build's).
+/// No pipeline may be made meanwhile.
+pub fn save_and_reopen_pipeline_cache() {
+    library::save_and_reopen();
+}
+
 /// The pre-build (`victory translate --cache --pipelines`): a title
 /// pipeline made ahead of a run into the pipeline library
 /// (`use_pipeline_cache`), by the code a run makes it with, so the run
