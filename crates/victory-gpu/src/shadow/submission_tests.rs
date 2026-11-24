@@ -99,6 +99,4 @@ fn a_range_is_refreshed_once_until_the_title_may_have_written_it() {
     });
     list.close();
     host.execute(&[&list]);
-    // A new submission starts over.
-    drop(title);
 }
