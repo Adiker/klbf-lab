@@ -46,9 +46,13 @@ We learn from the best projects first, VIctory above all, then XCL, Palmwave, an
 
 **Every GPU.** Our own runs happen on an AMD card, but the goal is one build that works on every GPU: AMD, NVIDIA and Intel results are all welcome, and we try not to break any of them.
 
+> [!NOTE]
+> **What you get from this branch today (Lab 15):** ~1 fps in the world, 25 min without a device removal on an RX 9070 XT, but the picture is still mostly dark (only rough shapes, best seen with the game's high-contrast option).
+> **The lit scene is not in this branch yet.** It comes from the [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork, which we only *tested* on AMD (see below). Our next builds put our fixes on top of it; this branch will be updated when one passes a full run.
+
 ## Try it yourself (AMD)
 
-The [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (VIctory + its own rendering fixes, all credit to its author) also draws the first gameplay scene on an **RX 9070 XT**, unchanged: about 2 fps on our machine after warm-up, no device removal, run with `VICTORY_D3D12_DRED=1`. Watch its memory: on our machine its committed memory kept growing to about 100 GB, and the run stopped after 8.5 min when Windows ran out of virtual memory (32 GB RAM + 90 GB page file). Build it from source like VIctory, with your own copy of the game. Our numbers are in [docs/klbf/results.md](docs/klbf/results.md); please report yours in an issue (GPU, driver, how long it ran, last lines of `stderr.log`).
+Not our code: the [fxceless/victory-gta6](https://github.com/fxceless/victory-gta6) fork (VIctory + its own rendering fixes, all credit to its author) also draws the first gameplay scene on an **RX 9070 XT**, unchanged: about 2 fps on our machine after warm-up, no device removal, run with `VICTORY_D3D12_DRED=1`. Watch its memory: on our machine its committed memory kept growing to about 100 GB, and the run stopped after 8.5 min when Windows ran out of virtual memory (32 GB RAM + 90 GB page file). Build it from source like VIctory, with your own copy of the game. Our numbers are in [docs/klbf/results.md](docs/klbf/results.md); please report yours in an issue (GPU, driver, how long it ran, last lines of `stderr.log`).
 
 ## Status
 
