@@ -5,6 +5,9 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 
 | Date (UTC) | Project | Build | Result |
 |---|---|---|---|
+| 2026-11-24 16:19 | Lab 12 | Lab 03 + #1036 + #1015 + #1019 | 130 s, low-address page fault (`0x2f32000`); no picture change before it |
+| 2026-11-24 16:08 | Lab 10 | Lab 09 + fix for blocks committed without a remap notice | 194 s, low-address page fault (`0x2a0a000`); watch time split: ~300 of ~337 ms/frame is the kernel `GetWriteWatch` side |
+| 2026-11-24 15:53 | Lab 09 (ours) | Lab 03 + unmapped view blocks reported once instead of re-read every submission | unmapped re-reads 484 → 11 MB/frame, frame time 900–1000 → 680–780 ms; but device removed at 542 s (low-address page fault) |
 | 2026-11-24 14:37 | Lab 08 | Lab 03 with #955 instead of #584 | no visible change (world still blank/black at ~1 fps); closed by us |
 | 2026-11-24 14:20 | Lab 07 | Lab 03 + #393 + #388 + #230 (host copy work) | 433 s, no device removal; still ~1 fps: bytes *checked* per frame 11.4 → 7.1 GB, but ~10 GB per frame are still *refreshed* (copied) |
 | 2026-11-24 14:17 | Lab 03 + `VICTORY_SHADER_LOOP_LIMIT=64` | – | no speed-up on this card (GPU 3–7 % busy); device removed at 161 s (low-address page fault) |
@@ -25,6 +28,7 @@ Text only, no screenshots. Times are seconds from launch; the world starts at ab
 | 2026-11-24 | XCL | `main` | stops ~100 s on the hang detector (`+0x23cf683`), 30–38 GB committed |
 
 Notes:
+- On this card every change we stacked on top of Lab 03 that touches how the GPU reads title memory (#641, #1019 group, our unmapped-skip) ends in the same low-address page-fault class (compute `37e19ccb4f889f63` / `eeed82b877b44b5f`). Lab 03 stays the stable baseline.
 - `VICTORY_KEYS` makes the keyboard stand-in pad the signed-in user's pad: a real pad then only reaches the pause button. Leave it unset to play with a pad.
 - Alt+Enter (fullscreen) freezes the picture in the world: stay windowed.
 - `VICTORY_D3D12_DRED=1` made runs clearly more stable on this card.
