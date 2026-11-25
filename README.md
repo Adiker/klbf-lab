@@ -163,6 +163,6 @@ Please report results in an [issue](https://github.com/PastiiJay/klbf-lab/issues
 
 ## Credits
 
-KLBF Lab started from [VIctory](https://github.com/Marvisak/VIctory) by Marvisak and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (see [README.fxceless.md](README.fxceless.md)); it is GPL-3.0 like them, and keeps their copyright notices. Fixes ported from other projects are credited where they are used, above and in the commit messages.
+KLBF Lab started from [VIctory](https://github.com/Marvisak/VIctory) by Marvisak and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (see [README.fxceless.md](README.fxceless.md)); it is GPL-3.0 like them, and keeps their copyright notices. Fixes ported from other projects are credited where they are used, above and in the commit messages. Thanks to [@HishamMuhammed](https://github.com/HishamMuhammed), whose questions shaped the [beginner's guide](docs/GUIDE.md), and to everyone who reported tests and sent fixes: [@clems206](https://github.com/clems206), [@TG0000](https://github.com/TG0000), [@gmankab](https://github.com/gmankab), [@brokeash](https://github.com/brokeash), [@HandshakeHackin](https://github.com/HandshakeHackin), [@kzrts](https://github.com/kzrts).
 
 Product names are only used to say what this works with; they belong to their owners. KLBF Lab is not affiliated with them. License: GPL-3.0.
