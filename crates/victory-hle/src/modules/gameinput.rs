@@ -1157,6 +1157,97 @@ mod host {
         }
     }
 
+    /// The first pad's buttons also pressed by the scripted keys.
+    fn with_scripted(mut pad: PadState) -> PadState {
+        for vk in scripted() {
+            if let Some(&(_, button)) = super::FALLBACK_BUTTONS.iter().find(|(key, _)| *key == vk) {
+                pad.buttons |= button;
+            }
+        }
+        pad
+    }
+
+    fn gamepad_line(ms: u128, g: &XINPUT_GAMEPAD) -> String {
+        format!(
+            "{ms} {} {} {} {} {} {} {}
+",
+            g.wButtons, g.bLeftTrigger, g.bRightTrigger, g.sThumbLX, g.sThumbLY, g.sThumbRX, g.sThumbRY
+        )
+    }
+
+    /// `VICTORY_PAD_RECORD=<file>`: the first pad's changes, in
+    /// milliseconds since the game world first showed, one line each.
+    fn record(g: &XINPUT_GAMEPAD) {
+        use std::io::Write;
+        use std::sync::Mutex;
+        static FILE: Mutex<Option<(std::fs::File, String)>> = Mutex::new(None);
+        static OPENED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let Some(since) = victory_gpu::world_since() else { return };
+        let mut file = FILE.lock().unwrap_or_else(|e| e.into_inner());
+        if !*OPENED.get_or_init(|| {
+            let Some(path) = std::env::var_os("VICTORY_PAD_RECORD") else { return false };
+            match std::fs::File::create(&path) {
+                Ok(f) => {
+                    *file = Some((f, String::new()));
+                    true
+                }
+                Err(error) => {
+                    tracing::error!(%error, "VICTORY_PAD_RECORD");
+                    false
+                }
+            }
+        }) {
+            return;
+        }
+        let Some((f, last)) = file.as_mut() else { return };
+        let line = gamepad_line(since.elapsed().as_millis(), g);
+        let state = line.split_once(' ').map_or("", |(_, rest)| rest);
+        if state != last {
+            *last = state.to_owned();
+            let _ = f.write_all(line.as_bytes());
+        }
+    }
+
+    /// `VICTORY_PAD_REPLAY=<file>` (written by `VICTORY_PAD_RECORD`): the
+    /// first pad plays it back, counted from when the game world first
+    /// showed; before that, and after its end, a pad at rest.
+    fn replayed() -> Option<XINPUT_GAMEPAD> {
+        static TAPE: std::sync::OnceLock<Option<Vec<(u128, XINPUT_GAMEPAD)>>> = std::sync::OnceLock::new();
+        let tape = TAPE
+            .get_or_init(|| {
+                let path = std::env::var_os("VICTORY_PAD_REPLAY")?;
+                let text = std::fs::read_to_string(&path).ok()?;
+                let tape: Vec<_> = text
+                    .lines()
+                    .filter_map(|line| {
+                        let v: Vec<i64> = line.split(' ').filter_map(|w| w.parse().ok()).collect();
+                        (v.len() == 8).then(|| {
+                            (v[0] as u128, XINPUT_GAMEPAD {
+                                wButtons: v[1] as u16,
+                                bLeftTrigger: v[2] as u8,
+                                bRightTrigger: v[3] as u8,
+                                sThumbLX: v[4] as i16,
+                                sThumbLY: v[5] as i16,
+                                sThumbRX: v[6] as i16,
+                                sThumbRY: v[7] as i16,
+                            })
+                        })
+                    })
+                    .collect();
+                tracing::info!(moves = tape.len(), "VICTORY_PAD_REPLAY: the recorded pad");
+                Some(tape)
+            })
+            .as_ref()?;
+        let rest = XINPUT_GAMEPAD::default();
+        let Some(since) = victory_gpu::world_since() else { return Some(rest) };
+        let now = since.elapsed().as_millis();
+        let at = tape.partition_point(|(ms, _)| *ms <= now);
+        if at == tape.len() {
+            return Some(rest);
+        }
+        Some(at.checked_sub(1).map_or(rest, |i| tape[i].1))
+    }
+
     #[derive(Default)]
     pub(super) struct Host {
         empty_until: [Option<Instant>; PADS],
@@ -1164,6 +1255,11 @@ mod host {
 
     impl Source for Host {
         fn pad(&mut self, slot: usize) -> Option<PadState> {
+            if slot == 0 {
+                if let Some(gamepad) = replayed() {
+                    return Some(with_scripted(convert(&gamepad)));
+                }
+            }
             if self.empty_until[slot].is_some_and(|until| Instant::now() < until) {
                 return None;
             }
@@ -1174,6 +1270,9 @@ mod host {
                 return None;
             }
             self.empty_until[slot] = None;
+            if slot == 0 {
+                record(&state.Gamepad);
+            }
             #[allow(unused_mut)]
             let mut pad = convert(&state.Gamepad);
             // The scripted keys (`VICTORY_KEYS`) also press the first

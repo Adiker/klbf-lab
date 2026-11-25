@@ -40,6 +40,8 @@ pub mod framelog;
 #[cfg(windows)]
 mod host;
 #[cfg(windows)]
+pub use host::world_since;
+#[cfg(windows)]
 mod indirect;
 #[cfg(windows)]
 mod inplace;

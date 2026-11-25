@@ -9057,6 +9057,7 @@ impl Host {
     /// frame was black (known for a copied texture only).
     pub(crate) fn present(&self, layers: &[Layer], frame: u64) -> Option<bool> {
         let showing = std::time::Instant::now();
+        world_watch(showing);
         let shown = self.present_now(layers, frame);
         crate::framelog::add(crate::framelog::T::PresentShowUs, showing.elapsed().as_micros() as u64);
         shown
@@ -10427,4 +10428,37 @@ mod fill_on_card_tests {
         assert!(title[64..1088].iter().all(|&b| b == 0xAA));
         crate::shadow::unregister(resource, start);
     }
+}
+
+/// When the game world first showed: the first of 20 frames in a row with
+/// more than 1500 draws (menus and loading screens draw a few dozen). The
+/// recorded pad (`VICTORY_PAD_RECORD` / `VICTORY_PAD_REPLAY`) counts from it.
+static WORLD_SINCE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+pub fn world_since() -> Option<std::time::Instant> {
+    WORLD_SINCE.get().copied()
+}
+
+fn world_watch(now: std::time::Instant) {
+    use std::sync::Mutex;
+    static RUN: Mutex<(u64, u32, Option<std::time::Instant>)> = Mutex::new((0, 0, None));
+    if WORLD_SINCE.get().is_some() {
+        return;
+    }
+    let drawn = crate::draw::drawn();
+    let mut run = RUN.lock().unwrap_or_else(|e| e.into_inner());
+    let (last, count, start) = &mut *run;
+    if drawn.saturating_sub(*last) > 1500 {
+        start.get_or_insert(now);
+        *count += 1;
+        if *count >= 20 {
+            let at = start.unwrap_or(now);
+            let _ = WORLD_SINCE.set(at);
+            tracing::info!("game world showing: the recorded pad counts from here");
+        }
+    } else {
+        *count = 0;
+        *start = None;
+    }
+    *last = drawn;
 }
