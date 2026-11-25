@@ -27,7 +27,7 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 | Settings | — | renders at 1280×720 (`--console series-s`), upscaled to 1920×1080 with AMD FSR; dips to ~0.5–1 fps while a new area loads |
 | Frame rate in game, native resolution | 🟡 ~5 fps | about 200 ms per frame |
 | Stability | ✅ 74 min in one session without a crash | recommended settings; 41 min at native resolution |
-| Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits on the seabed (cause found, see Water); the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings in this version; fixed in test build Lab 38 (KLBF Lab Beta) |
+| Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits on the seabed (water physics fixed in test build Lab 39); the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings in this version; fixed in test build Lab 38 (KLBF Lab Beta) |
 | Story progress | ✅ Into Jason's first mission ("Gone Fishing"), up to the seaplane | played through Lucia's prologue (cell, office, the robbery, the arrest), then Jason's first mission: the boat, the swamp on foot, the camp, the seaplane, in a 41 min session without a crash (test build Lab 38); water checkpoints passed by skipping after 3 failures (see Water) |
 
 ### Why AMD FSR
@@ -46,9 +46,9 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 | Prologue: the robbery | ✅ | (prologue while playing: 5.7) | purple stickers on the glass, bank faces deformed |
 | Prologue: the escape and the arrest | ✅ | ~4 outside, high-contrast light | the earlier crash point, passed since Lab 33 |
 | Jason's first mission ("Gone Fishing"): the boat | 🟡 passed by skipping | 6.3 / 9.8 | the boat sits on the seabed and does not move, so the chase fails; after 3 failed tries the game offers to skip the checkpoint |
-| "Gone Fishing": on foot in the swamp, the camp, finding Donnie | ✅ | 5.2 average / 12.9 peak (whole 41 min session, test build Lab 38) | first fight works; in the water the character stands on the bottom and cannot climb out (same cause as the boat) |
+| "Gone Fishing": on foot in the swamp, the camp, finding Donnie | ✅ | 5.2 average / 12.9 peak (whole 41 min session, test build Lab 38) | first fight works; in the water the character stands on the bottom and cannot climb out (same cause as the boat: water physics) |
 | "Gone Fishing": the seaplane and the landing | 🟡 reached | (same session) | the seaplane stays under water and its engine is destroyed; skipping after 3 failures got past take-off, the landing sends back to the previous checkpoint |
-| Further | ⏳ next | — | water fixed in test build Lab 39 (see below); full play-through next |
+| Further | ⏳ next | — | water physics fixed in test build Lab 39 (see below); full play-through next |
 
 ### Milestones
 
@@ -65,14 +65,14 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 
 How we measure: the frame rate the layer logs about every 5 s, in the world only (loading screens and the first 2 minutes of shader compiling left out). Numbers are given per scene: standing in the prison cell, and while actually playing through the prologue and Jason's first mission (18 min session, test build Lab 37). Lows are taken from those 5 s averages, so single-frame dips may go lower.
 
-### Water: fixed in test build Lab 39
+### Water physics: fixed in test build Lab 39
 
 In test build Lab 39 ([KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta/tree/klbf-amd)) the boat in Jason's first mission **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank. It will come to this version once it has been played through.
 
 Boats, the seaplane and the player in water all behave as if there were no water: the boat rests on the seabed, the seaplane "flies" under the surface. The water itself is drawn right. We think the cause is this: on console the CPU and the GPU share memory, and the game's physics reads back the water height the GPU computes each frame; in our layer that result stayed on the graphics card, so the physics read an empty height map. The next build copies those water textures back into the game's memory (ported from Geckomacabre/vx-layer); fixed in test build Lab 39, together with the XOR swizzle mode the height map is stored in (ported from MiamiGame/XTP).
 
 > [!TIP]
-> Until the water fix is out: when a water checkpoint fails, fail it **3 times** and the game offers to skip it.
+> Until the water physics fix reaches this version: when a water checkpoint fails, fail it **3 times** and the game offers to skip it.
 
 ## Community and test reports
 
