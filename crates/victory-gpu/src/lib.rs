@@ -57,6 +57,8 @@ mod profile;
 pub mod query;
 pub mod queue;
 #[cfg(windows)]
+mod ranges;
+#[cfg(windows)]
 mod queue2;
 pub mod resource;
 pub mod root;
