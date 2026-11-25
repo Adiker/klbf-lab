@@ -73,7 +73,7 @@ $env:VICTORY_LATE_WAIT = '1'
 $env:VICTORY_WIDE_BACK = '1'
 $env:VICTORY_PIPELINE_WAIT_MS = '24'
 $env:VICTORY_RELAY_COPY_QUEUE = '0'
-$env:VICTORY_FFX_DIR = '<FidelityFX SDK>Kitsidelityfxsignedbin'   # AMD FSR, needed for --console series-s
+$env:VICTORY_FFX_DIR = '<FidelityFX SDK>\Kits\FidelityFX\signedbin'   # AMD FSR, needed for --console series-s
 target\release\victory.exe run --console series-s <game dir>\<the title's exe> --execute
 ```
 
