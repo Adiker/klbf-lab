@@ -170,6 +170,16 @@ mod host {
         }
         let captured = CAPTURED.load(Ordering::Relaxed);
         match msg {
+            // A click that activates the window: the title's procedure eats
+            // it, so it is taken here (activate, and capture on the way).
+            wm::WM_MOUSEACTIVATE
+                if !captured
+                    && (lparam & 0xFFFF) as u32 == HTCLIENT
+                    && ((lparam >> 16) & 0xFFFF) as u32 == wm::WM_LBUTTONDOWN =>
+            {
+                capture(hwnd);
+                Some(wm::MA_ACTIVATEANDEAT as LRESULT)
+            }
             wm::WM_LBUTTONDOWN if !captured => {
                 capture(hwnd);
                 // The click that captures is not a trigger pull.
@@ -184,18 +194,18 @@ mod host {
                 unsafe { SetCursor(std::ptr::null_mut()) };
                 Some(1)
             }
-            wm::WM_KILLFOCUS | wm::WM_CAPTURECHANGED if captured => {
-                release();
+            wm::WM_KILLFOCUS if captured => {
+                release("focus lost");
                 None
             }
             wm::WM_ACTIVATEAPP | wm::WM_ACTIVATE if captured && wparam & 0xFFFF == 0 => {
-                release();
+                release("deactivated");
                 None
             }
             wm::WM_SYSKEYDOWN | wm::WM_KEYDOWN
                 if captured && matches!(wparam, VK_MENU | VK_LMENU | VK_RMENU) =>
             {
-                release();
+                release("Alt");
                 None
             }
             wm::WM_MOVE | wm::WM_SIZE | wm::WM_WINDOWPOSCHANGED if captured => {
@@ -229,12 +239,12 @@ mod host {
         tracing::info!("mouse look: captured (Alt or switching windows releases it)");
     }
 
-    fn release() {
+    fn release(why: &str) {
         CAPTURED.store(false, Ordering::Relaxed);
         BUTTONS.store(0, Ordering::Relaxed);
         // SAFETY: lifts the clip.
         unsafe { ClipCursor(std::ptr::null()) };
-        tracing::info!("mouse look: released");
+        tracing::info!(why, "mouse look: released");
     }
 
     /// Keeps the cursor inside the client area, in screen coordinates.
