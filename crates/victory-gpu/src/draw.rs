@@ -185,9 +185,14 @@ const WINDOW_MOST: u64 = 64;
 /// Off for the rest of the run from the first error the card's driver
 /// reports to the system (`crate::drvwatch`): every loss of the card in a
 /// run with windows was announced that way seconds ahead.
+///
+/// On by default since the indirect clamp charges its budget once per
+/// group in the card's memory (#220): in the world on an RTX 4090, 159 ms a
+/// frame without windows, 117-126 ms with them (the card's waits 68 -> 26
+/// ms). `VICTORY_INDIRECT_WINDOW=0` clamps record by record, as before.
 fn windows() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_INDIRECT_WINDOW").is_some_and(|v| v == "1")) && !crate::drvwatch::tripped()
+    *ON.get_or_init(|| std::env::var_os("VICTORY_INDIRECT_WINDOW").is_none_or(|v| v != "0")) && !crate::drvwatch::tripped()
 }
 
 /// What one title list has set, and what its host list was last given.
@@ -483,10 +488,27 @@ fn root_view(list: &HostList, address: u64, srv: bool) -> Option<u64> {
         list.buffer_state(&shadow.buffer, crate::host::BUFFER_READ);
         return Some(gpu);
     }
+    // As table constant buffers (#522): bytes a flight in the air may
+    // write are copied from the host copy on the card, behind the flight,
+    // instead of filled from title memory at submission, which waits for
+    // the flight to land (`VICTORY_FILL_ON_CARD=0` fills as before).
+    if crate::host::fill_on_card()
+        && crate::host::late()
+        && crate::host::flights_write(address as usize, (address + len) as usize)
+    {
+        shadow.refresh(list, address, len);
+        if let Some(gpu) = list.card_constants(&shadow, address, len) {
+            ROOT_ON_CARD.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Some(gpu);
+        }
+    }
     let (gpu, to) = list.scratch(len)?;
     list.defer_fill(to, address as *const u8, len as usize);
     Some(gpu)
 }
+
+/// Root constant buffers filled on the card behind flights ([`root_view`]).
+pub(crate) static ROOT_ON_CARD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 macro_rules! once {
     ($($arg:tt)*) => {{
@@ -1872,7 +1894,9 @@ impl State {
             let mut partly = None;
             if let Some(View::Placed(false, resource, desc)) = heap.handle(index).and_then(crate::descriptor::view) {
                 let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
-                let len = crate::resource::placed_bytes(&resource).unwrap_or(1);
+                // Of the mips the view shows: what lies behind them is
+                // another texture's.
+                let len = crate::resource::placed_bytes_from(&resource, crate::resource::first_mip(&desc)).unwrap_or(1);
                 let mapped = crate::texture::mapped_bytes(address as *const u8, len as usize);
                 if mapped == 0 {
                     HEAP_TEXTURES_AWAY.fetch_add(1, Ordering::Relaxed);
@@ -1963,6 +1987,9 @@ impl State {
             // through a table: they upload it, and check it at every
             // submission that samples it.
             let tabled = crate::texture::is_staged(resource);
+            if tabled {
+                crate::texture::upload_again(resource);
+            }
             if let Some(view) = &view {
                 readable(list, sampled.kind, view);
             }
@@ -2668,6 +2695,18 @@ impl State {
                 let index = first + k;
                 let used = entries.iter().find(|u| u.table_offset_dwords / 8 == k);
                 match crate::descriptor::view(table + u64::from(k) * 32) {
+                    Some(View::Constant(address, size))
+                        if crate::host::fill_on_card()
+                            && crate::host::late()
+                            && crate::host::flights_write(address as usize, address as usize + size as usize)
+                            && let Some(shadow) = crate::shadow::find(address, u64::from(size))
+                            && let Some(gpu) = {
+                                shadow.refresh(list, address, u64::from(size));
+                                list.card_constants(&shadow, address, u64::from(size))
+                            } =>
+                    {
+                        host.constant_at(index, gpu, size);
+                    }
                     Some(View::Constant(address, size)) => {
                         let Some((gpu, to)) = list.scratch(u64::from(size)) else {
                             host.make_null(index);
@@ -2855,7 +2894,7 @@ impl State {
             };
             let (from, to, stride) = (from as usize, to as usize, stride as usize);
             let n = rects as usize;
-            list.defer_host(move || {
+            list.defer_host_read(from as *const u8, n * 3 * stride, move || {
                 // The vertices are read in place, at submission: no change
                 // of mapping under the read (see
                 // `crate::watch::title_memory_reading`).
@@ -3310,7 +3349,12 @@ fn readable(list: &HostList, kind: ResourceType, view: &View) {
                 && let Some(t) = crate::resource::host_resource(*resource as This)
                 && crate::texture::title_written(t)
             {
-                crate::texture::upload(list, *resource as This, t);
+                // Of a texture the title placed, the mips the view shows.
+                let first = match (&placed, view) {
+                    (Some(_), View::Shader(_, Some(desc))) => crate::resource::first_mip(desc),
+                    _ => 0,
+                };
+                crate::texture::upload_from(list, *resource as This, t, first);
             }
             // A depth texture shaders also write: what they wrote, first.
             list.twin_use(*resource as This, false, false);

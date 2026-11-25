@@ -1266,6 +1266,40 @@ fn into_destination(
     }
 }
 
+/// The page numbers of a destination. The title fills the array after it
+/// enqueued the request (a copy taken then holds zeros, or the numbers of
+/// the array's last use), so it is read when the request runs; a number
+/// that is still zero then is waited for, a tenth of a second at most.
+fn filled(array: *const usize, n: usize) -> Vec<usize> {
+    static LATE: AtomicU64 = AtomicU64::new(0);
+    let read = || -> Vec<usize> {
+        // SAFETY: the title passes a page number per 64 KiB of destination
+        // and keeps the array until the request completes; it may write it
+        // from another thread meanwhile.
+        (0..n).map(|i| unsafe { array.add(i).read_volatile() }).collect()
+    };
+    let mut pages = read();
+    if !pages.contains(&0) {
+        return pages;
+    }
+    let began = std::time::Instant::now();
+    while pages.contains(&0) && began.elapsed() < std::time::Duration::from_millis(100) {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        pages = read();
+    }
+    let late = LATE.fetch_add(1, Ordering::Relaxed) + 1;
+    if late <= 8 || late.is_power_of_two() {
+        tracing::warn!(
+            requests = late,
+            pages = n,
+            waited_ms = began.elapsed().as_millis() as u64,
+            filled = !pages.contains(&0),
+            "dstorage: a request ran before its page array was filled"
+        );
+    }
+    pages
+}
+
 /// Slots by the 2020 order, which the argument shapes at
 /// the title's call sites match (0x18, 0x20, 0x30 and 0x40 are called).
 static QUEUE_VTABLE: Methods<12> = Methods([
@@ -1417,6 +1451,20 @@ mod tests {
 
     fn pattern(n: usize) -> Vec<u8> {
         (0..n).map(|i| (i * 7 + i / 251) as u8).collect()
+    }
+
+    #[test]
+    fn a_page_array_filled_late_is_waited_for() {
+        let array: &'static [std::sync::atomic::AtomicUsize] = Box::leak(Box::new([std::sync::atomic::AtomicUsize::new(7), std::sync::atomic::AtomicUsize::new(0)]));
+        let title = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            array[1].store(8, Ordering::Release);
+        });
+        assert_eq!(filled(array.as_ptr().cast(), 2), [7, 8]);
+        title.join().unwrap();
+        // One never filled is given up on.
+        array[0].store(0, Ordering::Release);
+        assert_eq!(filled(array.as_ptr().cast(), 2), [0, 8]);
     }
 
     #[test]

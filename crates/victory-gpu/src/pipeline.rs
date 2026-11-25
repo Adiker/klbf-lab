@@ -130,6 +130,26 @@ impl Shader {
     }
 }
 
+/// Puts the translation of a container of the title's into the cache on
+/// disk, and with `compute` its host pipeline into the driver's, before any
+/// run wants them. Whether it translated, and whether it has a pipeline
+/// (`None`: not asked for, or left out).
+#[cfg(windows)]
+pub fn warm(stage: &'static str, container: &[u8], compute: bool) -> (bool, Option<bool>) {
+    let full = blake3::hash(container);
+    // Not through the table, which lets nothing go.
+    let shader = Arc::new(Shader {
+        stage,
+        hash: full.to_hex()[..16].to_owned(),
+        container: container.to_vec(),
+        translated: OnceLock::new(),
+        walks: OnceLock::new(),
+    });
+    let translated = shader.translated().is_some();
+    let made = (translated && compute).then(|| make::warm(vec![shader])).flatten();
+    (translated, made)
+}
+
 /// A translated shader and the console resources its code reads.
 #[cfg(windows)]
 pub(crate) struct Translated {
@@ -449,6 +469,10 @@ struct Pipeline {
     /// One of the ray-tracing structure builder's ([`Builder`]).
     #[cfg(windows)]
     builder: bool,
+    /// One with a shader of [`drop_shaders`]: never made on the host, its
+    /// draws and dispatches not run.
+    #[cfg(windows)]
+    dropped: bool,
 }
 const _: () = assert!(offset_of!(Pipeline, packet) == 0x10);
 
@@ -498,6 +522,32 @@ pub(crate) fn making() -> u64 {
 #[cfg(all(windows, feature = "diagnostics"))]
 static DROPS: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 
+/// Shader hashes whose pipelines are dropped ([`drop_shaders`]).
+#[cfg(windows)]
+static DROPPED_SHADERS: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
+
+/// Pipelines made with any of these shaders (16-digit hashes, the first 8
+/// bytes of the container's BLAKE3, as in the pipeline diagnostics) are not
+/// made on the host, and their draws and dispatches are not run; in every
+/// build, unlike `VICTORY_SKIP_PIPELINES`. Set once, before the title makes
+/// pipelines (the front end's `VICTORY_RT_OFF`); later sets are ignored.
+pub fn drop_shaders(hashes: std::collections::HashSet<String>) {
+    #[cfg(windows)]
+    let _ = DROPPED_SHADERS.set(hashes);
+    #[cfg(not(windows))]
+    let _ = hashes;
+}
+
+/// Pipelines made dropped ([`drop_shaders`]).
+pub static DROPPED_PIPELINES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(windows)]
+fn dropped(shaders: &[Arc<Shader>]) -> bool {
+    DROPPED_SHADERS
+        .get()
+        .is_some_and(|d| shaders.iter().any(|s| d.contains(&s.hash)))
+}
+
 /// Shader hashes as printed in the pipeline diagnostics.
 #[cfg(windows)]
 fn parse_skip_hashes(value: &str) -> Vec<String> {
@@ -538,13 +588,16 @@ fn skipped_shader(shaders: &[Arc<Shader>]) -> Option<&str> {
         .map(|shader| shader.hash.as_str())
 }
 
+/// Whether draws and dispatches of `this` are not run: dropped
+/// ([`drop_shaders`]) or, in diagnostics builds, skipped
+/// (`VICTORY_SKIP_PIPELINES`).
 #[cfg(windows)]
 pub(crate) fn is_skipped(this: This) -> bool {
     if this.is_null() {
         return false;
     }
     let p = pipeline(this);
-    skipped_shader(&p.shaders).is_some() || library::crashed(&p.host.key)
+    skipped_shader(&p.shaders).is_some() || library::crashed(&p.host.key) || p.dropped
 }
 
 /// Counts a draw or dispatch of `this` intentionally skipped or dropped
@@ -558,6 +611,7 @@ pub(crate) fn note_drop(this: This) {
         skipped_shader(&p.shaders)
             .map(|hash| format!("skipped shader {hash}"))
             .or_else(|| library::crashed(&p.host.key).then(|| "crashed the driver in a pre-build".to_owned()))
+            .or_else(|| p.dropped.then(|| "ray tracing, off (VICTORY_RT_OFF)".to_owned()))
             .or_else(|| make::missing(&p.host))
     };
     if let Some(why) = why {
@@ -607,7 +661,11 @@ fn hand_out(
     // A skipped shader's pipeline is never drawn with: not prewarmed either,
     // even if an earlier run's early-pipelines.txt lists it.
     #[cfg(windows)]
-    if skipped_shader(&shaders).is_none() && !library::crashed(&host.key) {
+    let dropped = dropped(&shaders);
+    #[cfg(windows)]
+    if dropped {
+        DROPPED_PIPELINES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    } else if skipped_shader(&shaders).is_none() && !library::crashed(&host.key) {
         make::early(&host);
     }
     #[cfg(windows)]
@@ -626,6 +684,8 @@ fn hand_out(
         host,
         #[cfg(windows)]
         builder,
+        #[cfg(windows)]
+        dropped,
         shaders,
         bound: std::sync::atomic::AtomicBool::new(false),
     });

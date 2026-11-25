@@ -1506,6 +1506,37 @@ mod tests {
         assert_eq!(XMemFreePhysicalPages(3, pages.as_ptr()), 1);
     }
 
+    /// Pages know where they are shown, as views come, are cut and go.
+    #[test]
+    fn pages_know_where_they_are_shown() {
+        let (mut count, mut pages) = (4usize, [0usize; 4]);
+        assert_eq!(XMemAllocatePhysicalPages(0, &mut count, pages.as_mut_ptr()), 1);
+        let kind = MEM_RESERVE | PAGES_64K;
+        let base = XMemVirtualAlloc(std::ptr::null_mut(), 8 * PAGE, kind, 3, PAGE_READWRITE);
+        assert!(!base.is_null());
+        let at = base as usize;
+        let shown = |page: usize| {
+            let physical = physical();
+            let key = physical.pages[&page].key(0);
+            let mut shown = physical.shown.get(&key).cloned().unwrap_or_default();
+            shown.sort_unstable();
+            shown
+        };
+        assert_eq!(XMemMapPhysicalPages(base, 4, pages.as_ptr()), base);
+        assert_eq!(shown(pages[2]), [at + 2 * PAGE]);
+        // Shown twice; the first view cut in two.
+        let second = (at + 5 * PAGE) as *mut c_void;
+        assert_eq!(XMemMapPhysicalPages(second, 1, &pages[2]), second);
+        assert_eq!(shown(pages[2]), [at + 2 * PAGE, at + 5 * PAGE]);
+        let gone = (at + 2 * PAGE) as *mut c_void;
+        XMemMapPhysicalPages(gone, 1, std::ptr::null());
+        assert_eq!(shown(pages[2]), [at + 5 * PAGE]);
+        assert_eq!(shown(pages[1]), [at + PAGE]);
+        assert_eq!(shown(pages[3]), [at + 3 * PAGE]);
+        XMemMapPhysicalPages(base, 8, std::ptr::null());
+        assert!(pages.iter().all(|&p| shown(p).is_empty()));
+    }
+
     #[test]
     fn page_windows_cover_one_run_in_place() {
         let (a, b) = (allocate(3), allocate(1));

@@ -110,7 +110,7 @@ use crate::{ShaderError, io, ir, resource, structure};
 
 pub use bitcode::census;
 pub use sampler::StaticSampler;
-pub use lower::{set_host_max_wave, set_host_pixel_wave};
+pub use lower::{host_max_wave, set_host_max_wave, set_host_pixel_wave};
 pub use rect::rect_list_gs;
 pub use shader::{
     MEMORY_FAULTS, MEMORY_PAGES, ROOT_CBV_SPACE, SAMPLER_SPACE, SLOT_FAULTS, SLOT_MEMORY, SLOT_STRIDES,
@@ -342,6 +342,23 @@ fn translate_plain(container: &[u8]) -> Result<HostShader, ShaderError> {
 
 /// Emits a program whose earlier stages already ran.
 pub fn emit(
+    c: &Container,
+    native: &NativeProgram,
+    p: &ir::Program,
+    st: &structure::Structured,
+    io: &io::Io,
+    res: &resource::Resources,
+) -> Result<HostShader, ShaderError> {
+    match emit_forms(c, native, p, st, io, res) {
+        Err(ShaderError::Unsupported { what, .. }) if what == lower::ONLY_DATA => {
+            lower::with_measured_descriptors(|| emit_forms(c, native, p, st, io, res))
+        }
+        r => r,
+    }
+}
+
+/// [`emit`]: the program, and where it is refused, its other forms.
+fn emit_forms(
     c: &Container,
     native: &NativeProgram,
     p: &ir::Program,
@@ -1750,6 +1767,11 @@ mod barycentric_tests {
     /// Translates a pixel program with the input VGPRs `input_addr`
     /// enables and one float4 TEXCOORD0 attribute (attr 0, row 0).
     fn pixel(words: &[u32], input_addr: u32) -> Result<HostShader, ShaderError> {
+        pixel_with(words, input_addr, false)
+    }
+
+    /// `pixel`, with TEXCOORD0 held as 16-bit values when `fp16`.
+    fn pixel_with(words: &[u32], input_addr: u32, fp16: bool) -> Result<HostShader, ShaderError> {
         let native = NativeProgram {
             stage: HwStage::Ps,
             wave64: false,
@@ -1763,7 +1785,7 @@ mod barycentric_tests {
                     mask: 0b1111,
                     attr: 0,
                     flat: false,
-                    fp16: false,
+                    fp16,
                     pack2: false,
                     row2: 0,
                 }],
@@ -1891,6 +1913,26 @@ mod barycentric_tests {
         validate(&shader);
     }
 
+    /// An f16 interpolation's first half keeps no value of its own (the second half writes
+    /// another VGPR and recomputes it). A `v_fma_mixlo_f16` into that VGPR keeps its high
+    /// half: zero then, as for other 16-bit writes, and the program translates.
+    /// Eight of the title's deferred material pixel programs do this.
+    #[test]
+    fn mixlo_over_an_f16_first_interpolation_half() {
+        let [e0, e1] = exp_mrt0(4);
+        let words = [
+            0xD742_0003, 0x0002_0000, // v_interp_p1ll_f16 v3, v0, attr0.x
+            0xD75A_0002, 0x040E_0200, // v_interp_p2_f16 v2, v1, attr0.x, v3
+            0xCC21_0003, 0x0A02_0502, // v_fma_mixlo_f16 v3, v2, v2, 0
+            0x7E08_1703,              // v_cvt_f32_f16 v4, v3
+            e0,
+            e1,
+            0xBF81_0000,
+        ];
+        let shader = pixel_with(&words, PERSP_CENTER, true).unwrap();
+        validate(&shader);
+    }
+
     /// Both: the attribute is interpolated and J is used as a value.
     #[test]
     fn interpolation_and_a_barycentric_value_together() {
@@ -2006,5 +2048,28 @@ mod barycentric_tests {
         let [e0, e1] = exp_mrt0(4);
         let words = [0xC812_0000, e0, e1, S_ENDPGM];
         assert!(pixel(&words, PERSP_CENTER).is_err());
+    }
+
+    /// A dead interpolated channel removed by `bitcode::opt` must not remain
+    /// marked read in `ISG1` (the DXIL validator checks the input signature
+    /// against the surviving `loadInput` / `attributeAtVertex` calls).
+    #[test]
+    fn dead_input_read_is_cleared_from_isg1_after_opt() {
+        let [e0, e1] = exp_mrt0(2);
+        let words = [
+            0xC808_0000, // v_interp_p1_f32 v2, v0, attr0.x
+            0xC809_0001, // v_interp_p2_f32 v2, v1, attr0.x
+            0xC810_0100, // v_interp_p1_f32 v4, v0, attr0.y (dead)
+            0xC811_0101, // v_interp_p2_f32 v4, v1, attr0.y (dead)
+            e0,
+            e1,
+            S_ENDPGM,
+        ];
+        let shader = pixel(&words, PERSP_CENTER).unwrap();
+        let host = Container::parse(&shader.dxil).unwrap();
+        let isg1 = host.part(FourCC::ISG1).unwrap().data;
+        // Row 0's ReadWriteMask byte is at offset 8 (header) + 25.
+        assert_eq!(isg1[8 + 25], 0x1, "dead .y channel left in ISG1 rw mask");
+        validate(&shader);
     }
 }

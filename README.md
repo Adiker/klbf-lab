@@ -1,5 +1,51 @@
 # VIctory fork (work in progress)
 
+## victory-amd
+
+This copy is a fork of
+[fxceless/victory-fork](https://github.com/fxceless/victory-fork), itself a fork
+of [VIctory](https://github.com/Marvisak/VIctory). It adds fixes found while
+running on an AMD card, tested on one machine only: Windows 11, Radeon RX 7800 XT
+16 GB (driver 32.0.32029.2010), Ryzen 5 7500F, 32 GB RAM.
+
+State on that machine (2026-11-25, Series X profile): the prologue's cutscene and
+the first room are drawn, with the player moving, at 2 to 3 frames per second.
+Runs of 8 minutes mostly end without a device loss; one ended with
+`DXGI_ERROR_DEVICE_HUNG` after about 5 and a half minutes, cause unknown. Lamps
+were dark in one run. The first room's walls were missing in several runs; with the
+guard over all the views of a page (below) they were there in two runs out of two,
+too few to call it fixed. Some shots of the opening cutscene come out white.
+Ray-traced light does not run.
+
+What it changes over `victory-fork` (each is explained in a comment where it is):
+
+- Texture views are told apart by the memory their mips really take, so textures
+  streamed in part are not taken for one another and are uploaded from their first
+  mip that is there.
+- Views of placed textures the host lost sight of are put back
+  (`VICTORY_TEXTURE_SWEEP`).
+- Dispatches of more than 65,535 groups are made in two parts (the final gather at
+  2560x1440 asks for 115,200).
+- DirectStorage requests read their page array when they run, and wait for it.
+- The list of pipelines to make early keeps what earlier runs listed, and compute
+  pipelines get their own waiting time while a world loads.
+- A write of the title's through one view of a physical page is seen by the copies
+  taken through its other views (`VICTORY_VIEW_GUARD=0` turns it off).
+- Textures picked by index are looked at again after their upload
+  (`VICTORY_HEAP_RECHECK=0` turns it off).
+- View indices past the host heap are clamped on AMD too.
+- Programs that stop the AMD driver's compiler, or take it minutes and tens of GB,
+  are left out (ray-tracing resolves).
+- Diagnostics: `VICTORY_NULL_MAGENTA`, `victory warm`, more captures.
+
+The guard over all the views of a page is code of
+[victory-fork #115](https://github.com/fxceless/victory-fork/pull/115) by Spexivus
+with [its correction](https://github.com/Spexivus/victory-fork/pull/1) by joroyt and
+a part of [VIctory #1122](https://github.com/Marvisak/VIctory/pull/1122) by tightfall,
+adapted here. The second look at textures is fxceless's idea (victory-fork `a803c87`),
+written anew. Other parts were prompted by pull requests and issues of VIctory and
+victory-fork, and their code was written anew. Developed with [Claude Code](https://claude.com/claude-code).
+
 A work-in-progress fork of [VIctory](https://github.com/Marvisak/VIctory), a
 compatibility layer that runs an Xbox Series title natively on Windows from
 files the user supplies. This fork follows upstream
@@ -228,6 +274,7 @@ Speed and memory:
 - Waits for memory values, write-watch queries and page queries no longer walk page tables per call.
 - Large title buffers get a copy in card memory, with shader writes found by hashing on the card.
 - Submissions can be sent ahead of the wait for the card (`VICTORY_LATE_WAIT`), with a relay thread that lands results as the card finishes (`VICTORY_RELAY`): in a first five-minute run the card's idle time behind the submitting thread fell from about 136 to 30 ms per frame.
+- Independent host-copy refreshes run in parallel by default on systems with at least four logical CPUs (`VICTORY_WIDE_REFRESH=0` disables this; `=1` forces it). This targets the serial memory reads that previously cost about 45–50 ms per frame on the test run.
 - Title memory can be opened as a graphics heap so that buffers are used in place instead of copied (`VICTORY_INPLACE`, first stage only; a probe confirmed the approach on the test GPU).
 - The bindless texture queue no longer uploads stale views; the view table no longer grows without bound; the pipeline library is mapped instead of read into memory.
 - An intermittent device loss was traced to the pipeline library file being replaced while mapped; fixed.
@@ -237,7 +284,9 @@ Speed and memory:
 Most of the newer speed changes sit behind environment switches that are off
 by default (`VICTORY_LATE_WAIT`, `VICTORY_RELAY`, `VICTORY_WIDE_BACK`,
 `VICTORY_CARD_BUFFERS_MIN_MB`, `VICTORY_INPLACE`, `VICTORY_BVH_BUILDER`, ...).
-Each is described in a comment where it is read.
+Independent host-copy refreshes are the exception: they use parallel workers
+automatically on systems with at least four logical CPUs. Each switch is
+described in a comment where it is read.
 
 ### Known problems
 
@@ -384,6 +433,7 @@ cargo build --profile diag -p victory --features diagnostics   # target\diag\vic
 | `VICTORY_PIPELINE_WAIT_MS=24` | reduce the per-frame wait for background pipeline creation from the default of 500 ms. A draw can be omitted until its pipeline is ready |
 | `VICTORY_SKIP_PIPELINES=<hash>,...` | omit draws and dispatches, including indirect ones, whose pipeline contains a listed 16-digit shader hash |
 | `VICTORY_GPU_TIMING=1` | with the above, each list of a submission run and timed on its own; slow lists logged with their slowest commands |
+| `VICTORY_CARD_HASH_WIDE=0` | the passes that find what shaders wrote to copies in the card's memory hash with one thread per 64 KiB, as before |
 | `VICTORY_D3D12_WARP=1` | host device on the software adapter (slow; cannot reset the driver) |
 | `VICTORY_SHADER_LOOP_LIMIT=<n>` | translated shader loops stop after `n` iterations per lane instead of 2^20 (own shader cache entries); if a lower `n` makes world frames much faster, loops hitting the limit are what makes them slow |
 | `VICTORY_AUDIO_CAPTURE=<file.wav>` | records what the title plays (our process only) |
@@ -397,3 +447,4 @@ title's data folder.
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+

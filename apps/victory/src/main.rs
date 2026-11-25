@@ -7,6 +7,7 @@ mod census;
 mod inspect;
 #[cfg(windows)]
 mod prebuild;
+mod rt_off;
 mod run;
 mod shader;
 mod translate;
@@ -99,6 +100,17 @@ enum Command {
         #[arg(long, requires = "pipelines", conflicts_with_all = ["validate", "list"])]
         cache: bool,
     },
+    /// Translate the shaders of a title's archives into the cache and make
+    /// their compute pipelines, so that a run finds them there.
+    Warm {
+        paths: Vec<PathBuf>,
+        /// Worker threads (default: every logical core).
+        #[arg(long)]
+        jobs: Option<usize>,
+        /// Only translate: no host pipelines.
+        #[arg(long)]
+        no_pipelines: bool,
+    },
     /// Prepare, map and bind a title executable; with --execute, run it.
     Run {
         exe: PathBuf,
@@ -189,6 +201,7 @@ fn main() -> Result<()> {
             }
             translate::run(paths, validate, pipelines, list, jobs)
         }
+        Command::Warm { paths, jobs, no_pipelines } => translate::warm_all(paths, jobs, !no_pipelines),
         Command::Run {
             exe,
             unimplemented,

@@ -103,6 +103,23 @@ struct Card {
     size: u64,
 }
 
+/// Whether a refresh compares the pages the title wrote with the copy and
+/// puts in only the 4 KiB pieces that differ (`VICTORY_COPY_COMPARE=1`; off
+/// by default). The write watch tells which pages were written, not whether
+/// their bytes changed; in a still scene the title writes 100-150 MB a
+/// frame of its buffers again, and for a copy in the card's memory every
+/// such byte went up and was hashed there again. With the switch a piece
+/// written with the bytes it held stays as it is: not copied, not sent up.
+pub(crate) fn copy_compare() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_COPY_COMPARE").is_some_and(|v| v == "1"))
+}
+
+/// Since the last frame-rate line, with [`copy_compare`]: bytes the title
+/// wrote that a refresh compared, and of them those that held what the
+/// copy held (not put in, not sent up).
+pub(crate) static COPY_COMPARED: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+
 /// Whether the host copies of big title buffers are in the card's own
 /// memory (on by default since run 75 showed it holds: the BVH skinning
 /// list went from 50.5 to 4.5 ms on the card; `VICTORY_CARD_BUFFERS=0`
@@ -3020,7 +3037,18 @@ impl Shadow {
     /// [`Shadow::update`] of `[from, to)` (inside the buffer) where no
     /// shader writes.
     fn update_free(&self, from: usize, to: usize) -> usize {
-        if self.watched.load(Ordering::Relaxed) != NOT_WATCHED {
+        // `VICTORY_FULL_REFRESH=1` (port of Yorivel's experiment, fork #62):
+        // every refresh copies the whole range whatever the tracking says,
+        // so a write the tracking misses cannot leave a copy stale.
+        // `VICTORY_FULL_REFRESH=check`: tracked as usual, then compared with
+        // title memory; a difference is a missed write, logged and put right.
+        static FULL: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+        let mode = *FULL.get_or_init(|| match std::env::var("VICTORY_FULL_REFRESH").as_deref() {
+            Ok("1") => 1,
+            Ok("check") => 2,
+            _ => 0,
+        });
+        if mode != 1 && self.watched.load(Ordering::Relaxed) != NOT_WATCHED {
             if let Some((now, written)) = crate::watch::writes(from, to, true) {
                 self.watched.store(1, Ordering::Relaxed);
                 let copied = self.copy_stale(from, to, now, &written);
@@ -3031,9 +3059,25 @@ impl Shadow {
                     add(C::Checked, (to - from) as u64);
                     add(C::Unchanged, (to - from).saturating_sub(copied) as u64);
                 }
+                if mode == 2 {
+                    self.check_missed(from, to);
+                }
                 return copied;
             }
-            self.watched.store(NOT_WATCHED, Ordering::Relaxed);
+            // `GetWriteWatch` refuses a range that spans two reservations as
+            // a whole (`watch::writes` returns None). Splitting it keeps the
+            // rest of the buffer watched instead of copying all of it every
+            // frame: only the piece that cannot be watched is copied.
+            if to - from > PAGE {
+                let mid = ((from + to) / 2) & !(PAGE - 1);
+                if mid > from && mid < to {
+                    let left = self.update_free(from, mid);
+                    return left + self.update_free(mid, to);
+                }
+            }
+            if to - from > PAGE {
+                self.watched.store(NOT_WATCHED, Ordering::Relaxed);
+            }
         }
         #[cfg(feature = "diagnostics")]
         crate::copystat::add(crate::copystat::C::WholeBytes, (to - from) as u64);
@@ -3102,6 +3146,48 @@ impl Shadow {
         }
     }
 
+    /// `VICTORY_FULL_REFRESH=check`: after a tracked refresh of `[from, to)`,
+    /// title memory compared with the copy; a difference is a write the
+    /// tracking did not report. Logged (first three per copy, then powers of
+    /// two) and copied whole.
+    fn check_missed(&self, from: usize, to: usize) {
+        if self.card.is_some() || self.place.is_some() || to <= from {
+            return;
+        }
+        let n = to - from;
+        let mut title = vec![0u8; n];
+        if !crate::host::read_into(from as *const u8, &mut title) {
+            return;
+        }
+        // SAFETY: inside the mapping; the refresh holds the copy.
+        let copy = unsafe { std::slice::from_raw_parts(self.data.add(from - self.start as usize), n) };
+        if title == copy {
+            return;
+        }
+        let first = title.iter().zip(copy).position(|(a, b)| a != b).unwrap_or(0);
+        let differing = title.iter().zip(copy).filter(|(a, b)| a != b).count();
+        static MISSES: Mutex<Option<std::collections::HashMap<u64, u64>>> = Mutex::new(None);
+        let times = {
+            let mut misses = MISSES.lock().unwrap_or_else(|e| e.into_inner());
+            let count = misses.get_or_insert_with(Default::default).entry(self.id).or_insert(0);
+            *count += 1;
+            *count
+        };
+        if times <= 3 || times.is_power_of_two() {
+            tracing::warn!(
+                copy = self.id,
+                start = format_args!("{:#x}", self.start),
+                len = self.len,
+                range = format_args!("{from:#x}+{n:#x}"),
+                first = format_args!("{:#x}", from + first),
+                differing,
+                times,
+                "MISSED WRITE"
+            );
+        }
+        self.copy(from, to);
+    }
+
     /// Copies the pages of `[from, to)` written after their last copy
     /// (`written`: last writes by page, in page order; `now`: this
     /// asking), whole pages within the buffer.
@@ -3143,6 +3229,9 @@ impl Shadow {
     fn copy(&self, from: usize, to: usize) -> usize {
         let (start, end) = (self.start as usize, (self.start + self.len) as usize);
         let (from, to) = (from.max(start), to.min(end));
+        if from < to && copy_compare() {
+            return self.copy_compared(from, to);
+        }
         // SAFETY: inside the mapping (`from` and `to` are within the buffer).
         let at = unsafe { self.data.add(from - start) };
         crate::host::copy_mapped(at, from as *const u8, to - from, false);
@@ -3150,6 +3239,47 @@ impl Shadow {
         self.changed(from - start, to - start);
         self.card_changed(from - start, to - start);
         to - from
+    }
+
+    /// [`Shadow::copy`] with [`copy_compare`]: title memory `[from, to)` is
+    /// read into scratch memory, and only the 4 KiB pieces that differ from
+    /// the copy are put in and noted changed (for snapshots and for the
+    /// card's side). Returns the bytes that differed.
+    fn copy_compared(&self, from: usize, to: usize) -> usize {
+        const PIECE: usize = 4096;
+        let start = self.start as usize;
+        thread_local! {
+            static SCRATCH: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        SCRATCH.with(|s| {
+            let mut title = s.borrow_mut();
+            title.clear();
+            title.resize(to - from, 0);
+            crate::host::copy_mapped(title.as_mut_ptr(), from as *const u8, to - from, false);
+            // SAFETY: inside the mapping (`from` and `to` are within the buffer).
+            let held = unsafe { std::slice::from_raw_parts_mut(self.data.add(from - start), to - from) };
+            let (mut changed, mut run): (usize, Option<usize>) = (0, None);
+            let mut at = 0;
+            while at <= title.len() {
+                let end = (at + PIECE).min(title.len());
+                let differs = at < title.len() && title[at..end] != held[at..end];
+                if differs {
+                    run.get_or_insert(at);
+                } else if let Some(first) = run.take() {
+                    held[first..at].copy_from_slice(&title[first..at]);
+                    self.changed(from - start + first, from - start + at);
+                    self.card_changed(from - start + first, from - start + at);
+                    changed += at - first;
+                }
+                if at == title.len() {
+                    break;
+                }
+                at = end;
+            }
+            COPY_COMPARED[0].fetch_add((to - from) as u64, Ordering::Relaxed);
+            COPY_COMPARED[1].fetch_add((to - from - changed) as u64, Ordering::Relaxed);
+            changed
+        })
     }
 
     /// Whether shaders read and write this copy in the card's own memory
@@ -3526,6 +3656,28 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         // memory. Not the big ones `cards` puts in the card's memory: those
         // are read too often to stay in the PC's.
         let big = cards() && size >= card_limits().0;
+        // Folded (`VICTORY_FOLD_BUFFERS=1`): a small buffer inside one
+        // window cell takes the cell's window as its copy, so that the
+        // buffer and the memory around it, which the title also reaches by
+        // address, are one copy. Two copies of the same bytes made every
+        // submission that refreshed one while a flight's shaders wrote the
+        // other wait for the card to drain: ~2.8 times a frame in the
+        // world, for 10-40 KB each (a 6.4 KB ring and a 465 KB buffer
+        // inside 4 MiB windows). One copy's own pending writes are left
+        // alone by its refresh and need no such wait.
+        if !big && fold_buffers() && !fine() && key.0 & !(WINDOW - 1) == (entry.end - 1) & !(WINDOW - 1) {
+            if let Some(window) = loose(key.0, entry.end, false, false) {
+                if FOLDED.fetch_add(1, Ordering::Relaxed) < 24 {
+                    tracing::info!(
+                        start = format_args!("{:#x}", key.0),
+                        len,
+                        "a buffer's copy is its window's (VICTORY_FOLD_BUFFERS)"
+                    );
+                }
+                entry.shadow = Some(window);
+                return entry.shadow.clone();
+            }
+        }
         if !big && let Some(placed) = crate::inplace::place_for(key.0, len, false) {
             entry.shadow = Some(Arc::new(Shadow::placed(placed, key.0, len, false)));
             return entry.shadow.clone();
@@ -3578,6 +3730,18 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
     }
     entry.shadow.clone()
 }
+
+/// Whether small title buffers inside one window cell share the cell's
+/// window as their copy (on by default; `VICTORY_FOLD_BUFFERS=0` gives
+/// each its own copy as before). Measured in the world (4090, same load):
+/// 179.2 -> 160.1 ms a frame, settles 4.5 -> 1.0 a frame.
+fn fold_buffers() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_FOLD_BUFFERS").is_none_or(|v| v != "0"))
+}
+
+/// Buffers folded into windows so far ([`fold_buffers`]).
+pub(crate) static FOLDED: AtomicU64 = AtomicU64::new(0);
 
 /// Titles also use memory outside any buffer object as GPU memory (
 /// the title's interface vertices, from its own allocator). Such memory
