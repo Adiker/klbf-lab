@@ -4,6 +4,7 @@
   <img src="https://img.shields.io/badge/version-Lab%2035-1f46c8" alt="version: Lab 35">
   <img src="https://img.shields.io/badge/~7%20fps-in%20game-1f46c8" alt="about 7 fps in game">
   <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
+  <a href="https://github.com/PastiiJay/klbf-lab-beta"><img src="https://img.shields.io/github/stars/PastiiJay/klbf-lab-beta?label=KLBF%20Lab%20Beta%20stars&color=555" alt="KLBF Lab Beta stars"></a>
 </p>
 
 An open lab that runs the Xbox Series X|S (Scarlett) build of the game natively on a Windows PC: a GDK compatibility layer (`kernelx`, `xgameruntime`, `d3d12_xs` → host D3D12, RDNA2 → DXIL shader translation) that combines the best fixes from open compatibility projects into one tested build. It builds on [VIctory](https://github.com/Marvisak/VIctory) and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (all rendering work there is its authors', see [README.fxceless.md](README.fxceless.md)), with fixes found on our own machine and fixes from other contributors, credited below.
@@ -23,6 +24,14 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 | Stability | ✅ 74 min in one session without a crash | recommended settings; 41 min at native resolution |
 | Rendering | 🟡 Mostly right | cell walls, faces, hair and outfits drawn; purple tint on some papers, stretched triangles around some characters, banding in skies |
 | Story progress | 🟡 Prologue | further progress to be measured |
+
+## Community and test reports
+
+This repository is new (25 Nov 2026), but the project is older: it started on **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, where its stars, forks and test reports are, and where every build is tried first. Reports from other testers there:
+
+- [RX 6900 XT (RDNA2), Windows 10](https://github.com/PastiiJay/klbf-lab-beta/issues/2): runs our builds for 19 min without a device removal; with Lab 33 the player's face renders on that card too; it helped us test two fixes.
+- [RX 6800 (RDNA2)](https://github.com/PastiiJay/klbf-lab-beta/issues/4): measured our AMD fixes on that card (same speed with them; purple sky and wet-looking skin gone).
+- [DirectStorage page lists](https://github.com/PastiiJay/klbf-lab-beta/issues/3): an analysis by another tester, now part of the build.
 
 No game files are included. You need your own legally obtained copy.
 
