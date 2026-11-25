@@ -953,6 +953,8 @@ fn bounds_pipeline(
     let device = device.cast::<ID3D12Device2>()?;
     super::library::pipeline(
         name,
+        // (#363's per-kind library counts: a mesh pair, or a graphics one)
+        if ms.pShaderBytecode.is_null() { "graphics" } else { "mesh" },
         // SAFETY: the stream holds whole subobjects pointing at live data.
         |library, name| unsafe { library.LoadPipeline(name, &desc) },
         // SAFETY: as above.
