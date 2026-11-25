@@ -89,6 +89,10 @@ pub(crate) struct Ready {
     pub(crate) faults: u64,
     /// The view heap slot of the null view; copy `n`'s view is `n` further.
     pub(crate) base: u32,
+    /// The last copy number with a view in the run at this bind: a copy
+    /// another list numbers later has no view here yet, and the shader
+    /// reads it as missing (from dexnom/VIctory 921d8d3b).
+    pub(crate) count: u32,
 }
 
 impl Memory {
@@ -315,5 +319,6 @@ pub(crate) fn ready(
         directory: m.directory.2,
         faults: m.faults.2,
         base,
+        count: m.copies.len() as u32,
     })
 }

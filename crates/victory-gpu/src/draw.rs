@@ -813,12 +813,13 @@ impl State {
         memory: Option<&crate::memory::Ready>,
     ) -> u32 {
         use victory_shader::emit::{USER_GROUP_BASE, USER_MEMORY_BASE, USER_VIEW_ADDRESS, USER_VIEW_BIAS};
-        // Set between the parts of a large dispatch (`group_base`).
-        if kind == USER_GROUP_BASE {
+        // Set between the parts of a large dispatch (`group_base`), and for
+        // a dispatch of threads (`dispatch`).
+        if kind == USER_GROUP_BASE || kind == victory_shader::emit::USER_DISPATCH_THREADS_X {
             return 0;
         }
         if kind == USER_MEMORY_BASE {
-            return memory.map_or(0, |m| m.base);
+            return memory.map_or(0, |m| if dword == 0 { m.base } else { m.count });
         }
         if kind == USER_VIEW_BIAS {
             // The view begins on 16 bytes of the copy the address finds
@@ -840,8 +841,9 @@ impl State {
         // The title address of the buffer view at that dword of the table.
         let address = match self.roots_ref(compute).get(usize::from(slot)) {
             Some(&Root::Table(table)) => crate::descriptor::view(table + u64::from(dword) * 4)
-                .and_then(|view| crate::descriptor::host::buffer_range(&view))
-                .map_or(0, |range| range.0),
+                .as_ref()
+                .and_then(crate::descriptor::host::guest_srv_address)
+                .unwrap_or(0),
             _ => 0,
         };
         if address == 0 {
@@ -857,12 +859,34 @@ impl State {
     /// For a shader that reads title memory by address
     /// ([`crate::memory`]): its directory, fault notes and view slots,
     /// with the pages of the root views the list has set made ready.
-    fn memory_ready(&self, list: &HostList, compute: bool, writes: bool) -> Option<crate::memory::Ready> {
+    fn memory_ready(
+        &self,
+        list: &HostList,
+        compute: bool,
+        writes: bool,
+        shader: &victory_shader::emit::HostShader,
+    ) -> Option<crate::memory::Ready> {
         let heap = match self.heaps[0] {
             0 => None,
             h => crate::descriptor::heap(h as This).host(),
         }?;
         let (mut addresses, mut constants) = (Vec::new(), Vec::new());
+        // The structures a traversal finds through the heap's views, and
+        // the buffers whose address it takes (from dexnom/VIctory 5f4c3df4).
+        if shader.root_srvs.contains(&victory_shader::emit::SLOT_VIEW_ADDRESSES) {
+            addresses.extend(heap.acceleration_addresses());
+        }
+        for word in &shader.user_data {
+            if word.root == RootType::Other(victory_shader::emit::USER_VIEW_ADDRESS)
+                && let Some(&Root::Table(table)) = self.roots_ref(compute).get(usize::from(word.slot))
+                && table != 0
+                && let Some(address) = crate::descriptor::view(table + u64::from(word.dword) * 4)
+                    .as_ref()
+                    .and_then(crate::descriptor::host::guest_srv_address)
+            {
+                addresses.push(address);
+            }
+        }
         for root in self.roots_ref(compute) {
             match root {
                 Root::View(address) => addresses.push(*address),
@@ -1053,11 +1077,16 @@ impl State {
             }
             // What the shader stores through root views and raw addresses is
             // copied back into title memory afterwards.
-            let writes = (t.stores || !write_skip())
-                && !crate::pipeline::builder_quarantined(self.pipeline as This);
-            // Title memory by address: what the shader finds it by.
+            let publish = !crate::pipeline::builder_quarantined(self.pipeline as This);
+            let writes = publish && (t.stores || !write_skip());
+            // Title memory by address: what the shader finds it by. A
+            // traversal that only reads the scene by address (its result
+            // goes to a texture or another root view) declares no copy
+            // written (from dexnom/VIctory bc3cd4b0: 2.0 s to 0.1 s of a
+            // City frame's waits for title memory).
             let memory = if t.host.root_srvs.contains(&victory_shader::emit::SLOT_MEMORY) {
-                let Some(ready) = self.memory_ready(list, compute, writes) else {
+                let raw_writes = publish && (t.host.writes_guest_memory || !write_skip());
+                let Some(ready) = self.memory_ready(list, compute, raw_writes, &t.host) else {
                     once!("a shader that reads title memory by address without a view heap to hold its views: the draw is dropped");
                     return false;
                 };
@@ -1103,6 +1132,29 @@ impl State {
                                 } else {
                                     l.SetGraphicsRootShaderResourceView(param, m.directory);
                                 }
+                            }
+                        }
+                        continue;
+                    }
+                    if srv && slot == victory_shader::emit::SLOT_VIEW_ADDRESSES {
+                        // Ours: the guest address of each heap slot's view.
+                        let Some(buffer) = (self.heaps[0] != 0)
+                            .then(|| crate::descriptor::heap(self.heaps[0] as This))
+                            .and_then(|heap| heap.host().and_then(|host| host.address_buffer(heap)))
+                        else {
+                            once!("a shader reads the view heap's addresses without a view heap: the draw is dropped");
+                            return false;
+                        };
+                        if list.first_use(windows::core::Interface::as_raw(buffer) as usize) {
+                            list.keep(buffer);
+                        }
+                        // SAFETY: an open list; the list holds the buffer.
+                        unsafe {
+                            let address = buffer.GetGPUVirtualAddress();
+                            if compute {
+                                l.SetComputeRootShaderResourceView(param, address);
+                            } else {
+                                l.SetGraphicsRootShaderResourceView(param, address);
                             }
                         }
                         continue;
@@ -1192,6 +1244,8 @@ impl State {
                         None
                     }
                 };
+                // Only a root view the code can store through is copied back.
+                let writes = writes && (!write_skip() || t.host.written_root_uavs.contains(&slot));
                 if !self.root_uav(list, address, param, compute, writes) {
                     return false;
                 }
@@ -2092,7 +2146,8 @@ impl State {
     }
 
     /// Runs a dispatch on the host.
-    pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32) {
+    /// `flags`: those of a console `DispatchX`.
+    pub(crate) fn dispatch(&mut self, list: &HostList, x: u32, y: u32, z: u32, flags: Option<u32>) {
         // It may write the arguments a window holds clamped.
         self.window = None;
         #[cfg(windows)]
@@ -2146,6 +2201,30 @@ impl State {
         }
         #[cfg(feature = "diagnostics")]
         list.note_op(|| self.op_text(format!("dispatch {x}x{y}x{z}"), true));
+        // A console DispatchX with flag 0x20 counts threads, not groups:
+        // the structure builder's box unpacking, header and geometry
+        // passes. They ran 64 times as many groups as asked, past the end
+        // of their data (from dexnom/VIctory bc3cd4b0).
+        let builder = crate::pipeline::is_builder(self.pipeline as This);
+        let thread_group = (builder && flags.unwrap_or(0) & 0x20 != 0)
+            .then(|| p.stages[0].translated().compute_threads)
+            .flatten();
+        let threads = [x, y, z];
+        let [x, y, z] = thread_group.map_or(threads, |size| dispatch_groups(threads, size));
+        // A program that masks the threads past the count in its last group
+        // (`victory_shader::emit::USER_DISPATCH_THREADS_X`).
+        let tail = thread_group.and_then(|size| {
+            compute_word(p, victory_shader::emit::USER_DISPATCH_THREADS_X).map(|(param, word)| (param, word, size[0]))
+        });
+        // A dispatch in parts starts host group numbers at 0 again: the
+        // threads left from this part on.
+        let set_tail = |base: u32| {
+            if let Some((param, word, width)) = tail {
+                let left = threads[0].saturating_sub(base.saturating_mul(width));
+                // SAFETY: an open list; the translated shader declares the word.
+                unsafe { list.list.SetComputeRoot32BitConstant(param, left, word) };
+            }
+        };
         match group_base(p) {
             Some((param, dword)) if x > crate::indirect::PART => {
                 // More than the host runs in one dimension: in parts.
@@ -2154,6 +2233,7 @@ impl State {
                 unsafe {
                     let mut base = 0;
                     while base < x {
+                        set_tail(base);
                         list.list.SetComputeRoot32BitConstant(param, base, dword);
                         list.list.Dispatch((x - base).min(crate::indirect::PART), y, z);
                         base += crate::indirect::PART;
@@ -2162,7 +2242,16 @@ impl State {
                 }
             }
             // SAFETY: an open list with everything set.
-            _ => unsafe { list.list.Dispatch(x, y, z) },
+            _ => {
+                set_tail(0);
+                // SAFETY: as above.
+                unsafe { list.list.Dispatch(x, y, z) }
+            }
+        }
+        if let Some((param, word, _)) = tail {
+            // Later dispatches run every thread of their groups.
+            // SAFETY: as above.
+            unsafe { list.list.SetComputeRoot32BitConstant(param, 0, word) };
         }
         DISPATCHED.fetch_add(1, Ordering::Relaxed);
         if self.ambient(list, p) {
@@ -3261,11 +3350,29 @@ impl State {
 /// group (`victory_shader::emit::USER_GROUP_BASE`): the root parameter of
 /// its user data and the dword in it.
 fn group_base(p: &crate::pipeline::host::HostPipeline) -> Option<(u32, u32)> {
+    compute_word(p, victory_shader::emit::USER_GROUP_BASE)
+}
+
+/// The root parameter and dword of a compute program's host value `kind`.
+fn compute_word(p: &crate::pipeline::host::HostPipeline, kind: u32) -> Option<(u32, u32)> {
     let stage = p.stages.first().filter(|_| p.compute)?;
     let (param, _) = stage.user_data?;
-    let base = RootType::Other(victory_shader::emit::USER_GROUP_BASE);
-    let word = stage.translated().host.user_data.iter().find(|u| u.root == base)?;
+    let word = stage.translated().host.user_data.iter().find(|u| u.root == RootType::Other(kind))?;
     Some((param, word.index))
+}
+
+/// Groups for a dispatch of `threads` in groups of `size`.
+fn dispatch_groups(threads: [u32; 3], size: [u32; 3]) -> [u32; 3] {
+    std::array::from_fn(|i| threads[i].div_ceil(size[i]))
+}
+
+#[cfg(test)]
+#[test]
+fn thread_dimensions_use_the_kernels_declared_group_size() {
+    assert_eq!(dispatch_groups([8847, 1, 1], [64, 1, 1]), [139, 1, 1]);
+    assert_eq!(dispatch_groups([74, 1, 1], [64, 1, 1]), [2, 1, 1]);
+    assert_eq!(dispatch_groups([0, 12, 9], [64, 4, 4]), [0, 3, 3]);
+    assert_eq!(dispatch_groups([u32::MAX, 1, 1], [64, 1, 1]), [1 << 26, 1, 1]);
 }
 
 /// The host command signature for one argument of `kind` with records
