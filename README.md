@@ -1,13 +1,13 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab 31 — AMD test branch</h1>
+<h1 align="center">KLBF Lab 33 — AMD test branch</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/test-Lab%2031-ff7a00" alt="test: Lab 31">
+  <img src="https://img.shields.io/badge/test-Lab%2033-ff7a00" alt="test: Lab 33">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
-  <img src="https://img.shields.io/badge/stable-5.2%20fps-ff7a00" alt="5.2 fps stable">
+  <img src="https://img.shields.io/badge/stable-5.1%20fps-ff7a00" alt="5.1 fps stable">
 </p>
 
-This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the newer [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (`4e17478`; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab). Previous test builds are kept as the tags `klbf-lab-28` and `klbf-lab-26`.
+This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the latest [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (25 Nov 2026, including triippywhale's AMD view-heap clamp and the skin/hair texture re-check; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab). Previous test builds are kept as the tags `klbf-lab-31`, `klbf-lab-28` and `klbf-lab-26`.
 
 No game files are included. You need your own legally obtained copy.
 
@@ -29,7 +29,9 @@ No game files are included. You need your own legally obtained copy.
 | | Result |
 |---|---|
 | First cell | walls, window frame, posters and photos drawn; Lucia's face, hair and orange outfit render; inmates in the yard |
-| Speed, settings below | ~5.2 fps (≈195 ms/frame), 14 min with no device removal in our run (Lab 28 without the wall fixes: ~5.6 fps) |
+| Speed, settings below | ~5.1–5.2 fps (≈195 ms/frame), three 14 min runs with no device removal |
+| Skipped shaders | only one left (`39f0e9aeb156a61c`, which never leaves the AMD compiler); the other 47 we used to skip now run on this card |
+| Cell walls | drawn in most runs but missing in some (sky where the wall should be), with the same settings: looks like a timing issue, under investigation |
 | Still wrong | a purple tint on some papers and photos, stretched "web" triangles around some characters that change every frame, some textiles look wet, colour banding in skies |
 
 These are a few runs on one machine: other cards and drivers may behave differently.
