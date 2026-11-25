@@ -587,7 +587,10 @@ extern "system" fn execute(this: This, count: u32, lists: *const This) {
 
 /// A present plane as the console lays it out: frame token, the plane's
 /// resources, their source rectangles and placements (optional), colour
-/// space and flags. 48 bytes, so a second plane starts at +0x30.
+/// space and flags, then 24 bytes not read here. 0x48 bytes, so a second
+/// plane starts at +0x48 (in Series S mode the title's interface, 3840x2160,
+/// over its 1920x1080 game image; read at +0x30 it was the first plane's
+/// tail, a plane of no resources, and menus and HUD were never shown).
 #[repr(C)]
 pub(crate) struct Plane {
     token: u64,
@@ -597,8 +600,9 @@ pub(crate) struct Plane {
     placements: *const u8,
     colour_space: u32,
     flags: u32,
+    _rest: [u64; 3],
 }
-const _: () = assert!(size_of::<Plane>() == 0x30);
+const _: () = assert!(size_of::<Plane>() == 0x48);
 
 /// The one plane and resource shown, for debugging:
 /// `VICTORY_PRESENT_PLANE=P` or `P:R`. Unset: every plane's resources, in
@@ -660,6 +664,38 @@ fn log_planes(planes: &[Plane]) {
         *last = text;
     }
 }
+/// For the first 20 s of presents, once a second: the resources each plane
+/// presents and the upscales recorded since the last such line.
+#[cfg(windows)]
+fn log_first_presents(frame: u64, planes: &[Plane]) {
+    use std::time::{Duration, Instant};
+    static TIMES: std::sync::Mutex<Option<(Instant, Instant)>> = std::sync::Mutex::new(None);
+    static UPSCALES: AtomicU64 = AtomicU64::new(0);
+    let now = Instant::now();
+    let mut times = TIMES.lock().unwrap_or_else(|e| e.into_inner());
+    let (first, last) = times.get_or_insert((now, now - Duration::from_secs(1)));
+    if now - *first > Duration::from_secs(20) || now - *last < Duration::from_secs(1) {
+        return;
+    }
+    *last = now;
+    let total = crate::ffx::UPSCALES.load(Ordering::Relaxed);
+    let upscales = total - UPSCALES.swap(total, Ordering::Relaxed);
+    let mut shown = Vec::new();
+    for (p, plane) in planes.iter().enumerate() {
+        for r in 0..if plane.resources.is_null() { 0 } else { plane.count as usize } {
+            // SAFETY: the plane lists `count` resources.
+            let resource = unsafe { *plane.resources.add(r) };
+            let host = crate::resource::host_resource(resource).map(|t| {
+                // SAFETY: a live resource.
+                let d = unsafe { t.GetDesc() };
+                (d.Width, d.Height, d.Format.0)
+            });
+            shown.push(format!("{p}.{r} {resource:?} {host:?}"));
+        }
+    }
+    tracing::info!(frame, upscales, planes = planes.len(), ?shown, "present (first 20 s, once a second): what each plane shows, upscales since the last line");
+}
+
 /// Submission tagged with the frame it belongs to `(count, lists, frame
 /// token, flags)`; frames are paced elsewhere, so it runs as a plain one.
 extern "system" fn execute_x(this: This, count: u32, lists: *const This, _token: u64, _flags: u32) {
@@ -893,6 +929,8 @@ extern "system" fn present(
     };
     #[cfg(windows)]
     log_planes(all);
+    #[cfg(windows)]
+    log_first_presents(frame, all);
     #[cfg(windows)]
     if let Some(host) = crate::host::host() {
         // The one resource asked for (the first plane's if there is no such
