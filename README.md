@@ -73,7 +73,8 @@ $env:VICTORY_LATE_WAIT = '1'
 $env:VICTORY_WIDE_BACK = '1'
 $env:VICTORY_PIPELINE_WAIT_MS = '24'
 $env:VICTORY_RELAY_COPY_QUEUE = '0'
-target\release\victory.exe run <game dir>\<the title's exe> --execute
+$env:VICTORY_FFX_DIR = '<FidelityFX SDK>KitsFidelityFXsignedbin'   # AMD FSR, needed for --console series-s
+target\release\victory.exe run --console series-s <game dir>\<the title's exe> --execute
 ```
 
 `VICTORY_SHADER_OPT=0` turns off the fork's shader clean-up passes, which crashed the AMD compiler for us. `VICTORY_TEXTURE_BUDGET_MB=6144` fixed some dark textiles for another tester but hid the cell walls in both our runs with it, so we leave it off for now. **Faster: Series S mode with AMD FSR.** Add `--console series-s` after `run`, and point `VICTORY_FFX_DIR` at the `signedbin` folder of AMD's official [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) (`$env:VICTORY_FFX_DIR = '<sdk>\Kits\FidelityFX\signedbin'`). The game renders at 1280×720 and FSR upscales it to 1920×1080: ~7.3 fps over 74 min here. Without FSR the Series S picture stays black. With FSR configured, Lab 38 and later show the start screen, menus and HUD in Series S mode. Plug the controller in before starting: plugging it in during play pauses the title.
