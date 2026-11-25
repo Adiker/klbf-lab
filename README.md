@@ -91,6 +91,9 @@ target\release\victory.exe run --console series-s <game dir>\<the title's exe> -
 
 `--console series-s` makes the title render at 1280×720, and AMD FSR (from the official [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK)) upscales it to 1920×1080: that is the ~7 fps setting. Without `--console series-s` the title renders at its native resolution (~5 fps here).
 
+> [!TIP]
+> With the recommended settings the start screen and the main menu stay **black**: the title is running behind it. Press **A** on the controller (or **Enter** on the keyboard, with the game window focused) to get past them; the picture appears once the world loads. Plug the controller in **before** starting: plugging it in during play pauses the title.
+
 `VICTORY_SHADER_OPT=0` turns off the fork's shader clean-up passes, which crashed the AMD compiler for us. `VICTORY_TEXTURE_BUDGET_MB=6144` fixed some dark textiles for another tester but hid the cell walls in both our runs with it, so we leave it off for now. 
 
 Please report results in an [issue](https://github.com/PastiiJay/klbf-lab-beta/issues): GPU, driver, how long it ran, fps in the window title, and what looks wrong. Patch notes: [CHANGELOG.md](CHANGELOG.md). Full run log: [docs/klbf/results.md](docs/klbf/results.md).
