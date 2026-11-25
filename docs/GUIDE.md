@@ -107,6 +107,7 @@ Then step 6, step 7 again, and step 8.
 | `X3506` or `vs_5_1` in the log, black window | Old Windows shader compiler: copy the x64 `d3dcompiler_47.dll` from a recent Windows SDK (`Redist\D3D\x64`) next to `victory.exe` |
 | `error: unexpected argument '--cache'` | You built an old copy: redo step 4 |
 | Graphics card stops responding after ~1 min | `$env:VICTORY_LATE_WAIT = '0'` |
+| Crash while loading: the log shows `dstorage: request failed: zlib … hr=0x8007000d`, then `0x80000003` at `victory-image…+0x19b5024` | Some game files are incomplete or damaged: copy the game folder again from your source (thanks @Emaxoso) |
 
 Still stuck? Open an [issue](https://github.com/PastiiJay/klbf-lab/issues) with your graphics card, driver version, Windows version and the last lines PowerShell printed.
 
