@@ -259,3 +259,15 @@ pub(crate) fn default_paths(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
     );
     Ok(all)
 }
+
+/// DirectX 12 Agility SDK version shipped in `.\D3D12\D3D12Core.dll`.
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+#[used]
+pub static D3D12SDKVersion: u32 = 614;
+
+/// Folder of the Agility SDK runtime, relative to the exe.
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+#[used]
+pub static D3D12SDKPath: [u8; 9] = *b".\D3D12\\0";
