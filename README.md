@@ -78,7 +78,7 @@ Boats, the seaplane and the player in water all behave as if there were no water
 
 ## Community and test reports
 
-This repository is new (25 Nov 2026), but the project is older: it started on **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, where every build is tried first: **10 stars and 2 forks** there on 25 Nov 2026, plus the test reports below. Reports from other testers there:
+This repository is new (25 Nov 2026), but the project is older: it started on **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, where every build is tried first: **11 stars and 2 forks** there on 25 Nov 2026, plus the test reports below. Reports from other testers there:
 
 - [RX 6900 XT (RDNA2), Windows 10](https://github.com/PastiiJay/klbf-lab-beta/issues/2): runs our builds for 19 min without a device removal; with Lab 33 the player's face renders on that card too; it helped us test two fixes.
 - [RX 6800 (RDNA2)](https://github.com/PastiiJay/klbf-lab-beta/issues/4): measured our AMD fixes on that card (same speed with them; purple sky and wet-looking skin gone).
