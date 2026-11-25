@@ -8,6 +8,8 @@
 
 <p align="center"><b>Test builds of KLBF Lab. The stable version is the <a href="https://github.com/PastiiJay/klbf-lab">main branch</a>.</b></p>
 
+**New to this? Follow the [beginner's guide](docs/GUIDE.md)** (copy-paste commands, page file, troubleshooting).
+
 To build it: `git clone -b beta https://github.com/PastiiJay/klbf-lab`, then the same steps as the main README (pipeline pre-build with `translate --cache --pipelines`, then `run`).
 
 This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the latest [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (25 Nov 2026, including triippywhale's AMD view-heap clamp and the skin/hair texture re-check; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`main`](https://github.com/PastiiJay/klbf-lab/tree/main). Previous test builds are kept as the tags `klbf-lab-33`, `klbf-lab-31`, `klbf-lab-28` and `klbf-lab-26`.
