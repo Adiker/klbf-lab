@@ -10,6 +10,16 @@ An open lab that runs a modern Xbox Series title natively on a Windows PC by com
 
 This is the one version we recommend. It is meant for every graphics card; so far we have tested it on an AMD Radeon RX 9070 XT, and reports from other cards (NVIDIA, Intel, other AMD) are very welcome. New builds are tried first in **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, the test lab, where issues and test reports go.
 
+## Measured results
+
+| | |
+|---|---|
+| Speed | **~7.3 fps** (median of 817 samples), recommended settings (720p upscaled to 1080p with AMD FSR) |
+| Longest run | **74 minutes in game with no crash** (recommended settings); 41 minutes at native resolution (~5 fps) |
+| How far | the prison prologue (Lucia's cell); earlier builds reached the first mission's robbery. Further progress not measured yet |
+| Hardware | AMD Radeon RX 9070 XT 16 GB (driver 32.0.32029.2010), AMD Ryzen 7 9800X3D, 32 GB RAM, Windows 11 |
+| Build | Lab 35, 25 Nov 2026 |
+
 No game files are included. You need your own legally obtained copy.
 
 ## What it fixes
