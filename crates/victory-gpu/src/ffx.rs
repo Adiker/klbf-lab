@@ -136,6 +136,9 @@ struct Api {
     dispatch: Dispatch,
 }
 
+/// Upscales recorded so far (for the present's log).
+pub(crate) static UPSCALES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Whether the title's FidelityFX calls come here: `VICTORY_FFX_DIR` or
 /// `VICTORY_FFX_SIMPLE=1` set.
 pub fn enabled() -> bool {
@@ -544,6 +547,7 @@ pub extern "C" fn ffxDispatch(context: *mut *mut c_void, desc: *const Header) ->
     // SAFETY: the SDK's call on an open host list with live textures.
     let r = unsafe { (api.dispatch)(context, (&raw const d).cast()) };
     if r == OK {
+        UPSCALES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(packed) = packed_output {
             packed.copy_to(list, output, destination);
             static FIRST_PACK: std::sync::Once = std::sync::Once::new();
@@ -599,6 +603,7 @@ fn simple_dispatch(
     };
     let recorded = simple::record(list, source, target, d.render_size, d.upscale_size);
     if recorded {
+        UPSCALES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(p) = packed {
             p.copy_to(list, output, destination);
         }
