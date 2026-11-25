@@ -270,4 +270,4 @@ pub static D3D12SDKVersion: u32 = 614;
 #[cfg(windows)]
 #[unsafe(no_mangle)]
 #[used]
-pub static D3D12SDKPath: [u8; 9] = [b'.', b'\\', b'D', b'3', b'D', b'1', b'2', b'\\', 0];
+pub static D3D12SDKPath: &[u8; 9] = &[b'.', b'\\', b'D', b'3', b'D', b'1', b'2', b'\\', 0];
