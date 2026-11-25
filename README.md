@@ -85,6 +85,6 @@ If the log reports `X3506: unrecognized compiler target 'vs_5_1'`, the shader co
 
 Place the x64 `d3dcompiler_47.dll` from `Redist\D3D\x64` in a recent Windows SDK beside `victory.exe`. Add `d3dcompiler_47=n,b` to Wine's DLL overrides. Version `10.0.28000.2705` restored the visible startup sequence on an RX 6800 with Wine and vkd3d-proton. [Windows SDK downloads](https://learn.microsoft.com/en-us/windows/apps/windows-sdk/downloads)
 
-Please report results in an [issue](https://github.com/PastiiJay/klbf-lab/issues): GPU, driver, how long it ran, fps in the window title, and what looks wrong. Patch notes: [CHANGELOG.md](CHANGELOG.md). Full run log: [docs/klbf/results.md](docs/klbf/results.md).
+Please report results in an [issue](https://github.com/PastiiJay/klbf-lab/issues): GPU, driver, how long it ran, fps in the window title, and what looks wrong. For a scene-by-scene report, run `py -3 docs/klbf/summarize_log.py run.log --lines FIRST LAST` with the first and last line numbers for one scene. The [log summary tool](docs/klbf/summarize_log.py) reports median timing samples and separates real and presented FPS when frame generation is logged. Patch notes: [CHANGELOG.md](CHANGELOG.md). Full run log: [docs/klbf/results.md](docs/klbf/results.md).
 
 Product names are only used to say what this works with; they belong to their owners. KLBF Lab is not affiliated with them. License: GPL-3.0.
