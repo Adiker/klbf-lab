@@ -29,6 +29,8 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 | Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits on the seabed (water physics fixed in test build Lab 39); the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings in this version; fixed in test build Lab 38 (KLBF Lab Beta); at night the vegetation turns magenta and the ground stays very dark |
 | Story progress | ✅ Open world reached: prologue and Jason's first mission ("Gone Fishing") completed, 3% of the story | played from a new game on our own build, with our own saves (no save file from anyone else): Lucia's prologue, then all of "Gone Fishing", then free roam from Jason's house, in a 77 min session without a crash (test build Lab 39); autosave and manual saves work, and the bed moves the time between day and night |
 
+> **Stability policy:** we never publish a build that crashed in our tests. Every session length shown here is when **we** stopped, to get back to work on the project or because a test run reached its planned end, not a crash.
+
 ### Why AMD FSR
 
 The recommended settings render the world at 1280×720 and upscale it to 1920×1080 with **AMD FSR** (FidelityFX Super Resolution). The game itself does the same on console: it ships with its own FSR upscaler and calls it every frame. KLBF Lab hands that call to AMD's official FidelityFX SDK on the PC, so the picture is upscaled the way the game expects, and the frame rate goes up by about a third. FSR works on AMD, NVIDIA and Intel cards. Native resolution without FSR is listed too (~5 fps).
