@@ -1578,7 +1578,7 @@ void main() {
             (&src_buf, 0),
             None,
             (KIND_DRAW, STRIDE, counts.len() as u32),
-            false,
+            0,
         ));
         // SAFETY: an open list; the clamped records are copied for the check.
         unsafe {
