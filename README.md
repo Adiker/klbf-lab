@@ -30,6 +30,32 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 | Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits too low in the water; the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings |
 | Story progress | ✅ Up to the start of Jason's first mission ("Gone Fishing") | played through Lucia's prologue (cell, office, the robbery, the arrest), then into Jason's first mission, driving the boat, in an 18 min session without a crash (test build Lab 37); there the boat floats too low in the water, so the mission fails |
 
+## Progress
+
+How far the project gets in the story, scene by scene (one machine: AMD Radeon RX 9070 XT, recommended settings with AMD FSR). Frame rates are measured in the world, while playing, unless stated.
+
+| Part of the story | Reached | Frame rate (average / peak) | Notes |
+|---|---|---|---|
+| Boot, intro video, start screen, menus | ✅ | 30 fps | menus stay black with the recommended settings: press A |
+| Prologue: Lucia's cell | ✅ | 7.3 standing / 5.7 while playing, peak 9.4 | walls, lighting, outfit right |
+| Prologue: the office interview | ✅ | (prologue while playing: 5.7) | faces mostly right, some deformed |
+| Prologue: the robbery | ✅ | (prologue while playing: 5.7) | purple stickers on the glass, bank faces deformed |
+| Prologue: the escape and the arrest | ✅ | ~4 outside, high-contrast light | the earlier crash point, passed since Lab 33 |
+| Jason's first mission ("Gone Fishing") | 🟡 started | 6.3 / 9.8 | driving the boat; the boat floats too low in the water, so the mission fails |
+| Further | ⏳ next | — | needs the boat fix |
+
+### Milestones
+
+| Date | Build | Milestone |
+|---|---|---|
+| 24 Nov 2026 | Lab 03 | in game, black world, ~1 fps, controller works |
+| 24 Nov 2026 | Lab 23 | first gameplay scene drawn on AMD, ~2 fps |
+| 24 Nov 2026 | Lab 26 | AMD memory leak and purple blocks fixed, ~4.4 fps |
+| 25 Nov 2026 | Lab 28 | Lucia's face, hair and outfit drawn |
+| 25 Nov 2026 | Lab 31 | the cell drawn with its walls |
+| 25 Nov 2026 | Lab 35 | 74 min in one session without a crash; prologue ~7.3 fps in the cell |
+| 25 Nov 2026 | Lab 37 | played from the prologue to the start of Jason's first mission ("Gone Fishing"), peak 9.8 fps |
+
 How we measure: the frame rate the layer logs about every 5 s, in the world only (loading screens and the first 2 minutes of shader compiling left out). Numbers are given per scene: standing in the prison cell, and while actually playing through the prologue and Jason's first mission (18 min session, test build Lab 37). Lows are taken from those 5 s averages, so single-frame dips may go lower.
 
 ## Community and test reports
