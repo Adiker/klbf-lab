@@ -7,7 +7,7 @@
   <a href="https://github.com/PastiiJay/klbf-lab-beta"><img src="https://img.shields.io/github/stars/PastiiJay/klbf-lab-beta?label=KLBF%20Lab%20Beta%20stars&color=555" alt="KLBF Lab Beta stars"></a>
 </p>
 
-<p align="center"><b>~7 fps in the prison prologue, up to the start of Jason's first mission ("Gone Fishing"), on an AMD Radeon RX 9070 XT.</b></p>
+<p align="center"><b>~7 fps in the prison prologue, into Jason's first mission ("Gone Fishing", up to the seaplane), on an AMD Radeon RX 9070 XT.</b></p>
 
 An open lab that runs the Xbox Series X|S (Scarlett) build of the game natively on a Windows PC: a GDK compatibility layer (`kernelx`, `xgameruntime`, `d3d12_xs` → host D3D12, RDNA2 → DXIL shader translation) that combines the best fixes from open compatibility projects into one tested build. It builds on [VIctory](https://github.com/Marvisak/VIctory) and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (all rendering work there is its authors', see [README.fxceless.md](README.fxceless.md)), with fixes found on our own machine and fixes from other contributors, credited below.
 
@@ -27,8 +27,8 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 | Settings | — | renders at 1280×720 (`--console series-s`), upscaled to 1920×1080 with AMD FSR; dips to ~0.5–1 fps while a new area loads |
 | Frame rate in game, native resolution | 🟡 ~5 fps | about 200 ms per frame |
 | Stability | ✅ 74 min in one session without a crash | recommended settings; 41 min at native resolution |
-| Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits too low in the water; the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings |
-| Story progress | ✅ Up to the start of Jason's first mission ("Gone Fishing") | played through Lucia's prologue (cell, office, the robbery, the arrest), then into Jason's first mission, driving the boat, in an 18 min session without a crash (test build Lab 37); there the boat floats too low in the water, so the mission fails |
+| Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits on the seabed (cause found, see Water); the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings in this version; fixed in test build Lab 38 (KLBF Lab Beta) |
+| Story progress | ✅ Into Jason's first mission ("Gone Fishing"), up to the seaplane | played through Lucia's prologue (cell, office, the robbery, the arrest), then Jason's first mission: the boat, the swamp on foot, the camp, the seaplane, in a 41 min session without a crash (test build Lab 38); water checkpoints passed by skipping after 3 failures (see Water) |
 
 ### Why AMD FSR
 
@@ -45,8 +45,10 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 | Prologue: the office interview | ✅ | (prologue while playing: 5.7) | faces mostly right, some deformed |
 | Prologue: the robbery | ✅ | (prologue while playing: 5.7) | purple stickers on the glass, bank faces deformed |
 | Prologue: the escape and the arrest | ✅ | ~4 outside, high-contrast light | the earlier crash point, passed since Lab 33 |
-| Jason's first mission ("Gone Fishing") | 🟡 started | 6.3 / 9.8 | driving the boat; the boat floats too low in the water, so the mission fails |
-| Further | ⏳ next | — | needs the boat fix |
+| Jason's first mission ("Gone Fishing"): the boat | 🟡 passed by skipping | 6.3 / 9.8 | the boat sits on the seabed and does not move, so the chase fails; after 3 failed tries the game offers to skip the checkpoint |
+| "Gone Fishing": on foot in the swamp, the camp, finding Donnie | ✅ | 5.2 average / 12.9 peak (whole 41 min session, test build Lab 38) | first fight works; in the water the character stands on the bottom and cannot climb out (same cause as the boat) |
+| "Gone Fishing": the seaplane and the landing | 🟡 reached | (same session) | the seaplane stays under water and its engine is destroyed; skipping after 3 failures got past take-off, the landing sends back to the previous checkpoint |
+| Further | ⏳ next | — | needs the water fix (cause found, see below) |
 
 ### Milestones
 
@@ -59,8 +61,16 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 | 25 Nov 2026 | Lab 31 | the cell drawn with its walls |
 | 25 Nov 2026 | Lab 35 | 74 min in one session without a crash; prologue ~7.3 fps in the cell |
 | 25 Nov 2026 | Lab 37 | played from the prologue to the start of Jason's first mission ("Gone Fishing"), peak 9.8 fps |
+| 25 Nov 2026 | Lab 38 (test) | menus, map, HUD, subtitles and button prompts show in Series S mode; 41 min of play without a crash; "Gone Fishing" played up to the seaplane, peak 12.9 fps |
 
 How we measure: the frame rate the layer logs about every 5 s, in the world only (loading screens and the first 2 minutes of shader compiling left out). Numbers are given per scene: standing in the prison cell, and while actually playing through the prologue and Jason's first mission (18 min session, test build Lab 37). Lows are taken from those 5 s averages, so single-frame dips may go lower.
+
+### Water: cause found
+
+Boats, the seaplane and the player in water all behave as if there were no water: the boat rests on the seabed, the seaplane "flies" under the surface. The water itself is drawn right. We think the cause is this: on console the CPU and the GPU share memory, and the game's physics reads back the water height the GPU computes each frame; in our layer that result stayed on the graphics card, so the physics read an empty height map. The next build copies those water textures back into the game's memory (ported from Geckomacabre/vx-layer); it is being tested now.
+
+> [!TIP]
+> Until the water fix is out: when a water checkpoint fails, fail it **3 times** and the game offers to skip it.
 
 ## Community and test reports
 
@@ -126,6 +136,8 @@ target\release\victory.exe run --console series-s <game dir>\<the title's exe> -
 
 > [!TIP]
 > With the recommended settings the start screen and the main menu stay **black**: the title is running behind it. Press **A** on the controller (or **Enter** on the keyboard, with the game window focused) to get past them; the picture appears once the world loads. Plug the controller in **before** starting: plugging it in during play pauses the title.
+
+If the device is lost about a minute after the world starts loading (reported on an RX 9070 non-XT, [#6](https://github.com/PastiiJay/klbf-lab-beta/issues/6)), try `VICTORY_LATE_WAIT=0`.
 
 `VICTORY_SHADER_OPT=0` turns off the fork's shader clean-up passes, which crashed the AMD compiler for us. `VICTORY_TEXTURE_BUDGET_MB=6144` fixed some dark textiles for another tester but hid the cell walls in both our runs with it, so we leave it off for now. 
 
