@@ -67,7 +67,7 @@ How we measure: the frame rate the layer logs about every 5 s, in the world only
 
 ### Water physics: fixed in test build Lab 39
 
-In test build Lab 39 ([KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta/tree/klbf-amd)) the boat in Jason's first mission **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank. It will come to this version once it has been played through.
+In test build Lab 39 ([KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta/tree/klbf-amd)) the boat in Jason's first mission **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank. The fix has also been confirmed by another user on an NVIDIA GeForce RTX 5070 Ti (16 GB), in their own build. Our own play-through on Lab 39: the boat, the seaplane take-off and flight (~9 fps) and the water landing all work. It will come to this version once the mission has been played to its end.
 
 Boats, the seaplane and the player in water all behave as if there were no water: the boat rests on the seabed, the seaplane "flies" under the surface. The water itself is drawn right. We think the cause is this: on console the CPU and the GPU share memory, and the game's physics reads back the water height the GPU computes each frame; in our layer that result stayed on the graphics card, so the physics read an empty height map. The next build copies those water textures back into the game's memory (ported from Geckomacabre/vx-layer); fixed in test build Lab 39, together with the XOR swizzle mode the height map is stored in (ported from MiamiGame/XTP).
 
