@@ -1137,6 +1137,10 @@ pub(crate) struct HostTexture {
     /// levels have been given. Its `bytes` are 0: what it holds of the card
     /// is counted there.
     pub(crate) tiled: Option<crate::tiles::Tiled>,
+    /// Its range of a texture heap ([`placed_texture`]), given back once
+    /// nothing holds the host resource and the submissions started by then
+    /// have run.
+    cut: Option<Cut>,
 }
 
 /// What a title texture has on the host: its host copy and, for a depth
@@ -1341,7 +1345,11 @@ fn hosted(this: This, make: bool) -> Option<Made> {
                 && (!crate::texture::committed(r.data().cast_const(), bytes as usize)
                     || crate::descriptor::host::next_start(start, start.saturating_add(bytes)).is_some()
                     || crate::descriptor::host::first_viewed(start).is_some_and(|first| first > 0));
-            let reserved = if partly { host_texture_as(&r.desc, r.host.state, clear, true, r.data() as usize) } else { None };
+            let reserved = if partly {
+                host_texture_as(&r.desc, r.host.state, clear, true, r.data() as usize).map(|(t, _)| t)
+            } else {
+                None
+            };
             let cut = reserved
                 .as_ref()
                 .zip(crate::host::host())
@@ -1353,9 +1361,13 @@ fn hosted(this: This, make: bool) -> Option<Made> {
                 texture = reserved;
             }
         }
+        let mut cut = None;
         let texture = match texture {
             Some(texture) => Some(texture),
-            None => host_texture(&r.desc, r.host.state, clear, r.data() as usize),
+            None => host_texture(&r.desc, r.host.state, clear, r.data() as usize).map(|(t, c)| {
+                cut = c;
+                t
+            }),
         };
         let Some(texture) = texture else {
             r.host.refused.store(true, Relaxed);
@@ -1378,6 +1390,7 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             Some(tiled) => HostTexture::new_tiled(texture, state, tiled),
             None => HostTexture::new(texture, state),
         };
+        host.cut = cut;
         host.filled = fills(&r.desc);
         if host.filled {
             KINDS[0].fetch_add(1, Relaxed);
@@ -1437,7 +1450,10 @@ pub(crate) fn room() -> bool {
     if filled < FLOOR {
         return true;
     }
-    match crate::host::host().and_then(|h| h.video_memory()) {
+    // Placed textures nothing holds any more give their ranges back here
+    // too: with no room nothing is placed, which is where else it is done.
+    sweep_leaving();
+    match video_memory_less_heap_room() {
         // What is kept for card copies of title buffers not made yet
         // (`crate::shadow::card_room_kept`) and for the render targets a
         // world makes in its first frame ([`targets_room_kept`]) counts as
@@ -1765,7 +1781,7 @@ pub(crate) fn let_go_idle() {
     if !*ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_SWEEP").is_none_or(|v| v != "0")) {
         return;
     }
-    let idle_ms = crate::host::vram_idle_ms(crate::host::host().and_then(|h| h.video_memory()));
+    let idle_ms = crate::host::vram_idle_ms(video_memory_less_heap_room());
     // For the trail (`crate::host::trail`): how many went, their bytes,
     // and the first one.
     let (mut went, mut bytes, mut first) = (0u64, 0u64, None);
@@ -1961,6 +1977,7 @@ impl HostTexture {
             bytes,
             filled: false,
             tiled: None,
+            cut: None,
         }
     }
 
@@ -1978,6 +1995,7 @@ impl HostTexture {
             bytes: 0,
             filled: false,
             tiled: Some(tiled),
+            cut: None,
         }
     }
 }
@@ -1991,6 +2009,12 @@ impl Drop for HostTexture {
         if self.filled {
             KINDS[0].fetch_sub(1, Relaxed);
             KINDS[1].fetch_sub(self.bytes, Relaxed);
+        }
+        // Host slots and lists may hold the texture itself past this: the
+        // range is given back when they let go of it.
+        if let Some(cut) = self.cut.take() {
+            let mut leaving = LEAVING.lock().unwrap_or_else(|e| e.into_inner());
+            leaving.push(Leaving(self.texture.clone(), cut));
         }
     }
 }
@@ -2077,7 +2101,7 @@ fn host_texture(
     state: u32,
     clear: *const c_void,
     title_address: usize,
-) -> Option<windows::Win32::Graphics::Direct3D12::ID3D12Resource> {
+) -> Option<(windows::Win32::Graphics::Direct3D12::ID3D12Resource, Option<Cut>)> {
     host_texture_as(desc, state, clear, false, title_address)
 }
 
@@ -2090,7 +2114,7 @@ fn host_texture_as(
     clear: *const c_void,
     reserved: bool,
     title_address: usize,
-) -> Option<windows::Win32::Graphics::Direct3D12::ID3D12Resource> {
+) -> Option<(windows::Win32::Graphics::Direct3D12::ID3D12Resource, Option<Cut>)> {
     use windows::Win32::Graphics::Direct3D12::*;
     use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
     const PC_FLAGS: u32 = 0xf; // render target, depth, UAV, no shader access
@@ -2170,7 +2194,7 @@ fn host_texture_as(
                 format!("texture {}x{} f{} flags {:#x}", d.width, d.height, d.format, d.flags)
             });
         }
-        return texture;
+        return texture.map(|t| (t, None));
     }
     let allocate = |d: &ResourceDesc, clear: Option<&[u32; 5]>| {
         let mut texture: Option<ID3D12Resource> = None;
@@ -2228,7 +2252,7 @@ fn host_texture_as(
         static WRITABLE_REJECTED: AtomicBool = AtomicBool::new(false);
         if !use_fallback || !WRITABLE_REJECTED.load(Relaxed) {
             match allocate(&d, clear_value.as_ref()) {
-                Ok(texture) => return texture,
+                Ok(texture) => return texture.map(|t| (t, None)),
                 Err(e) => {
                     static REPORTED: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
                     let code = e.code().0;
@@ -2246,7 +2270,7 @@ fn host_texture_as(
         }
         d.flags = 0;
         match allocate(&d, None) {
-            Ok(texture) => texture,
+            Ok(texture) => texture.map(|t| (t, None)),
             Err(e) => {
                 static FAILED: std::sync::Once = std::sync::Once::new();
                 FAILED.call_once(|| tracing::warn!(hresult = ?e.code(), desc = ?d, title_address, "no copyable host RGB9E5 texture"));
@@ -2254,14 +2278,222 @@ fn host_texture_as(
             }
         }
     } else {
+        // A texture nothing renders to or writes: in a range of a big heap.
+        if d.flags & (TARGET | DEPTH | UNORDERED) == 0
+            && d.sample_count <= 1
+            && clear_value.is_none()
+            && texture_heaps()
+            && let Some((t, cut)) = placed_texture(
+                host,
+                &d,
+                D3D12_RESOURCE_STATES(crate::host::legal_for(d.flags, crate::host::texture_state(state)) as i32),
+            )
+        {
+            crate::host::name(&t, || {
+                format!("texture {}x{} f{} flags {:#x} placed", d.width, d.height, d.format, d.flags)
+            });
+            return Some((t, Some(cut)));
+        }
         match allocate(&d, clear_value.as_ref()) {
-            Ok(texture) => texture,
+            Ok(texture) => texture.map(|t| (t, None)),
             Err(e) => {
                 tracing::warn!(error = %e, desc = ?d, "no host texture");
                 None
             }
         }
     }
+}
+
+/// Whether plain host textures are placed in big heaps
+/// (`VICTORY_TEXTURE_HEAPS=0`: a committed resource each, as before).
+#[cfg(windows)]
+fn texture_heaps() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_HEAPS").is_none_or(|v| v != "0"))
+}
+
+/// The size of a heap plain host textures are placed in.
+#[cfg(windows)]
+const TEXTURE_HEAP: u64 = 256 << 20;
+
+/// A heap of the card's memory for plain textures, and what is free in it.
+#[cfg(windows)]
+struct TextureHeap {
+    heap: windows::Win32::Graphics::Direct3D12::ID3D12Heap,
+    ranges: crate::ranges::Ranges,
+}
+// SAFETY: a free-threaded D3D12 object.
+#[cfg(windows)]
+unsafe impl Send for TextureHeap {}
+
+/// The heaps, never given back to the host (their ranges are).
+#[cfg(windows)]
+static TEXTURE_HEAPS: std::sync::Mutex<Vec<TextureHeap>> = std::sync::Mutex::new(Vec::new());
+
+/// Bytes of the texture heaps no texture is placed in. The system counts a
+/// heap whole as the card's memory in use: the texture queue's room and
+/// the idle sweep take these off ([`video_memory_less_heap_room`]), or the
+/// queue stops for good once the heaps look nine tenths of the card, and
+/// the sweep lets textures go that free ranges, not memory (their runs
+/// `pool_try1/2`: black faces and shirts).
+#[cfg(windows)]
+static HEAP_FREE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The system's budget and use of the card's memory, less the free bytes
+/// of the texture heaps from the use.
+#[cfg(windows)]
+fn video_memory_less_heap_room() -> Option<[u64; 4]> {
+    let [budget, used, shared_budget, shared_used] = crate::host::host()?.video_memory()?;
+    let free = HEAP_FREE.load(std::sync::atomic::Ordering::Relaxed);
+    Some([budget, used.saturating_sub(free), shared_budget, shared_used])
+}
+
+/// A host texture's range of a texture heap; dropping it gives it back.
+#[cfg(windows)]
+pub(crate) struct Cut {
+    heap: usize,
+    offset: u64,
+    len: u64,
+}
+
+#[cfg(windows)]
+impl Drop for Cut {
+    fn drop(&mut self) {
+        let mut heaps = TEXTURE_HEAPS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(heap) = heaps.get_mut(self.heap) {
+            heap.ranges.give(self.offset, self.len);
+            HEAP_FREE.fetch_add(self.len, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+/// A placed texture whose [`HostTexture`] is gone, and its range. The
+/// texture is released first, then the range given back (field order).
+#[cfg(windows)]
+struct Leaving(windows::Win32::Graphics::Direct3D12::ID3D12Resource, #[allow(dead_code)] Cut);
+// SAFETY: a free-threaded D3D12 object and a range.
+#[cfg(windows)]
+unsafe impl Send for Leaving {}
+
+/// Placed textures on their way out: something may still hold the host
+/// resource (a host slot showing its view, a list). Their ranges are not
+/// cut again until nothing does: giving the range back with the
+/// `HostTexture` turned shirts black in their run `pool_try1`, a slot still
+/// showing a texture whose memory another had been placed in.
+#[cfg(windows)]
+static LEAVING: std::sync::Mutex<Vec<Leaving>> = std::sync::Mutex::new(Vec::new());
+
+/// Whether `texture` is the last reference to its resource.
+#[cfg(windows)]
+fn last_reference(texture: &windows::Win32::Graphics::Direct3D12::ID3D12Resource) -> bool {
+    let raw = windows::core::Interface::as_raw(texture);
+    // SAFETY: a live COM object, whose first word points at the table of
+    // `IUnknown`; a reference added and released again tells how many are
+    // left.
+    unsafe {
+        let table = *raw.cast::<*const windows::core::IUnknown_Vtbl>();
+        ((*table).AddRef)(raw);
+        ((*table).Release)(raw) == 1
+    }
+}
+
+/// Lets go of the leaving textures nothing else holds (at most ten times a
+/// second): the texture and then its range, once the submissions started
+/// by now have run.
+#[cfg(windows)]
+fn sweep_leaving() {
+    use std::sync::atomic::Ordering::Relaxed;
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = crate::host::now_ms();
+    let last = LAST.load(Relaxed);
+    if now < last + 100 || LAST.compare_exchange(last, now, Relaxed, Relaxed).is_err() {
+        return;
+    }
+    let gone: Vec<Leaving> = {
+        let mut leaving = LEAVING.lock().unwrap_or_else(|e| e.into_inner());
+        let (gone, kept) = std::mem::take(&mut *leaving).into_iter().partition(|l| last_reference(&l.0));
+        *leaving = kept;
+        gone
+    };
+    for leaving in gone {
+        crate::host::retire(leaving);
+    }
+}
+
+/// A plain texture (no target, depth or unordered access) placed in a range
+/// of a 256 MB heap, with the range (from shadowdog00/vi-pc-combo 0781f61).
+/// A committed resource per texture is an allocation in the host's kernel
+/// each; the pass over textures picked by index made 1,000-2,000 a frame in
+/// the opening cutscene (their run `dl_diag1`). `None` for textures of an
+/// eighth of a heap and more, near the budget, and when the host refuses:
+/// the caller then makes a committed one.
+///
+/// ponytail: a range given back is not cleared, so a texture placed there
+/// starts with what the last one held where a committed one starts with
+/// zeros. Title textures are uploaded before they are sampled.
+#[cfg(windows)]
+fn placed_texture(
+    host: &crate::host::Host,
+    d: &ResourceDesc,
+    state: windows::Win32::Graphics::Direct3D12::D3D12_RESOURCE_STATES,
+) -> Option<(windows::Win32::Graphics::Direct3D12::ID3D12Resource, Cut)> {
+    use windows::Win32::Graphics::Direct3D12::*;
+    // SAFETY: the description has the host's layout (as in `allocate`).
+    let desc = unsafe { std::ptr::from_ref(d).cast::<D3D12_RESOURCE_DESC>().read_unaligned() };
+    // SAFETY: plain query of the device.
+    let info = unsafe { host.device.GetResourceAllocationInfo(0, &[desc]) };
+    let (len, align) = (info.SizeInBytes, info.Alignment);
+    if len == 0 || len > TEXTURE_HEAP / 8 || !align.is_power_of_two() {
+        return None;
+    }
+    sweep_leaving();
+    let (heap, cut) = {
+        let mut heaps = TEXTURE_HEAPS.lock().unwrap_or_else(|e| e.into_inner());
+        // The newest heap first: the older ones are full but for holes.
+        let found = heaps.iter_mut().enumerate().rev().find_map(|(i, h)| h.ranges.take(len, align).map(|at| (i, at)));
+        let (index, offset) = match found {
+            Some(found) => found,
+            None => {
+                // Not near the budget the system gives: the caller makes a
+                // committed texture then.
+                if let Some([budget, used, ..]) = host.video_memory()
+                    && used + TEXTURE_HEAP >= budget / 20 * 19
+                {
+                    return None;
+                }
+                let heap_desc = D3D12_HEAP_DESC {
+                    SizeInBytes: TEXTURE_HEAP,
+                    Properties: D3D12_HEAP_PROPERTIES { Type: D3D12_HEAP_TYPE_DEFAULT, ..Default::default() },
+                    Alignment: 0,
+                    Flags: D3D12_HEAP_FLAG_DENY_BUFFERS | D3D12_HEAP_FLAG_DENY_RT_DS_TEXTURES,
+                };
+                let mut heap: Option<ID3D12Heap> = None;
+                // SAFETY: plain creation of a heap; the out pointer is ours.
+                if let Err(e) = unsafe { host.device.CreateHeap(&heap_desc, &mut heap) } {
+                    tracing::warn!(error = %e, heaps = heaps.len(), "no heap for plain textures");
+                    return None;
+                }
+                let heap = heap?;
+                let index = heaps.len();
+                tracing::info!(index, megabytes = TEXTURE_HEAP >> 20, "a heap for plain textures made");
+                let mut ranges = crate::ranges::Ranges::new(TEXTURE_HEAP);
+                let offset = ranges.take(len, align)?;
+                heaps.push(TextureHeap { heap, ranges });
+                HEAP_FREE.fetch_add(TEXTURE_HEAP, std::sync::atomic::Ordering::Relaxed);
+                (index, offset)
+            }
+        };
+        HEAP_FREE.fetch_sub(len, std::sync::atomic::Ordering::Relaxed);
+        (heaps[index].heap.clone(), Cut { heap: index, offset, len })
+    };
+    let mut texture: Option<ID3D12Resource> = None;
+    // SAFETY: the range is this texture's alone until `cut` is dropped.
+    let made = unsafe { host.device.CreatePlacedResource(&heap, cut.offset, &desc, state, None, &mut texture) };
+    if let Err(e) = made {
+        tracing::warn!(error = %e, desc = ?d, "no placed host texture");
+        return None;
+    }
+    Some((texture?, cut))
 }
 
 
