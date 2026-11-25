@@ -6,19 +6,23 @@
   <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
 </p>
 
-An open lab that runs a modern Xbox Series title natively on a Windows PC by combining the best fixes from every open compatibility project into one tested build. It builds on [VIctory](https://github.com/Marvisak/VIctory) and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (all rendering work there is its authors', see [README.fxceless.md](README.fxceless.md)), with fixes found on our own machine and fixes from other contributors, credited below.
+An open lab that runs the Xbox Series X|S (Scarlett) build of the game natively on a Windows PC: a GDK compatibility layer (`kernelx`, `xgameruntime`, `d3d12_xs` → host D3D12, RDNA2 → DXIL shader translation) that combines the best fixes from open compatibility projects into one tested build. It builds on [VIctory](https://github.com/Marvisak/VIctory) and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (all rendering work there is its authors', see [README.fxceless.md](README.fxceless.md)), with fixes found on our own machine and fixes from other contributors, credited below.
 
 This is the one version we recommend. It is meant for every graphics card; so far we have tested it on an AMD Radeon RX 9070 XT, and reports from other cards (NVIDIA, Intel, other AMD) are very welcome. New builds are tried first in **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, the test lab, where issues and test reports go.
 
-## Measured results
+## Status (2026-11-25, Lab 35)
 
-| | |
-|---|---|
-| Speed | **~7.3 fps** (median of 817 samples), recommended settings (720p upscaled to 1080p with AMD FSR) |
-| Longest run | **74 minutes in game with no crash** (recommended settings); 41 minutes at native resolution (~5 fps) |
-| How far | the prison prologue (Lucia's cell); earlier builds reached the first mission's robbery. Further progress not measured yet |
-| Hardware | AMD Radeon RX 9070 XT 16 GB (driver 32.0.32029.2010), AMD Ryzen 7 9800X3D, 32 GB RAM, Windows 11 |
-| Build | Lab 35, 25 Nov 2026 |
+Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), AMD Ryzen 7 9800X3D, 32 GB RAM, Windows 11. Self-reported, one machine so far.
+
+| Stage | Status | Notes |
+|---|---|---|
+| Boot, first-run screens, intro, menus | ✅ Works | 30 fps |
+| In game (prison prologue) | ✅ Player in control | the character moves under the player's control; earlier builds reached the first mission's robbery |
+| Frame rate in game, recommended settings | 🟡 ~7.3 fps | median of 817 samples; renders at 1280×720 (`--console series-s`), upscaled to 1920×1080 with AMD FSR |
+| Frame rate in game, native resolution | 🟡 ~5 fps | about 200 ms per frame |
+| Stability | ✅ 74 min in one session without a crash | recommended settings; 41 min at native resolution |
+| Rendering | 🟡 Mostly right | cell walls, faces, hair and outfits drawn; purple tint on some papers, stretched triangles around some characters, banding in skies |
+| Story progress | 🟡 Prologue | further progress to be measured |
 
 No game files are included. You need your own legally obtained copy.
 
