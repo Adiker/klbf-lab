@@ -546,7 +546,10 @@ mod tests {
             u32s(&mut f, &[list.len() as u32]);
             for (i, (name, kind)) in list.iter().enumerate() {
                 let payload = [slot as u8 * 16 + i as u8; 40];
-                let packed = miniz_oxide::deflate::compress_to_vec(&payload, 6);
+                let mut buf = vec![0u8; zlib_rs::compress_bound(payload.len())];
+                let config = zlib_rs::DeflateConfig { window_bits: -15, ..zlib_rs::DeflateConfig::new(6) };
+                let (packed, rc) = zlib_rs::compress_slice(&mut buf, &payload, config);
+                assert_eq!(rc, zlib_rs::ReturnCode::Ok);
                 str(&mut f, name);
                 f.push(*kind);
                 let n = packed.len() as u32 + 12;
