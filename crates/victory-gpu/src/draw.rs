@@ -1012,6 +1012,12 @@ impl State {
     /// False if the draw or dispatch must not run: a root SRV it reads
     /// could not be given a view.
     pub(crate) fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
+        // Depth planes behind their twins, brought up to date before this
+        // command (`VICTORY_PLANE_NOW=1`); the pass's own state is replaced
+        // by the title's.
+        if list.planes_now() {
+            self.replay(list);
+        }
         list.begin_command();
         let l = &list.list;
         // Textures picked by index, before anything asks for them.

@@ -3023,15 +3023,17 @@ fn make(view: &View, at: D3D12_CPU_DESCRIPTOR_HANDLE) -> Option<Kept> {
             Some(None)
         }
         View::Placed(unordered, resource, desc) => {
+            const BUFFER: u32 = 1;
+            if *unordered && resource[0] != BUFFER {
+                note_placed_uav(resource, desc);
+            }
             if let Some(view) = placed_texture(view) {
                 return make(&view, at);
             }
-            const BUFFER: u32 = 1;
             if resource[0] != BUFFER {
-                // shortcut: unordered access to a texture the title placed
-                // itself is not mirrored; give it a resource as shader
-                // views of such textures get when a dispatch writes one.
-                once!(dimension = resource[0], "placed unordered texture view not mirrored");
+                // Unordered access to a texture the title placed itself,
+                // without `VICTORY_PLACED_UAV=1`: left null, what shaders
+                // store there is lost.
                 return None;
             }
             // The resource description's width, after the alignment.
@@ -3078,17 +3080,69 @@ fn same_placed_texture(a: &View, b: &View) -> bool {
 
 /// A shader view of a texture the title placed in memory itself, as a view
 /// of the resource made for that memory (on first use).
+/// With `VICTORY_PLACED_UAV=1`, unordered views of the same: as a view of
+/// that resource too, so what shaders store lands where shader views of
+/// that memory read it (the resource description must match: a view
+/// placed in another format gets a resource of its own).
 pub(crate) fn placed_texture(view: &View) -> Option<View> {
     const BUFFER: u32 = 1;
-    let View::Placed(false, resource, desc) = view else {
+    let View::Placed(unordered, resource, desc) = view else {
         return None;
     };
-    if resource[0] == BUFFER {
+    if resource[0] == BUFFER || (*unordered && !placed_uav()) {
         return None;
     }
     let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
     let texture = crate::resource::texture_at(address, resource)?;
-    Some(View::Shader(texture as usize, desc[..10].try_into().ok()))
+    let words = desc[..10].try_into().ok();
+    Some(if *unordered {
+        View::Unordered(texture as usize, 0, words)
+    } else {
+        View::Shader(texture as usize, words)
+    })
+}
+
+/// `VICTORY_PLACED_UAV=1`: unordered views of textures the title placed
+/// itself are made (they were left null: every store through them lost).
+fn placed_uav() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_PLACED_UAV").is_some_and(|v| v == "1"))
+}
+
+/// Unordered views of textures the title placed itself, since the start.
+pub(crate) static PLACED_UAVS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Counts such a view and logs the first distinct textures: which passes
+/// store into them (depth pyramids, reflections, luminance), and whether
+/// other placed textures share the memory (another description: shader
+/// views of it would not see the stores even when mirrored).
+fn note_placed_uav(resource: &[u32; 14], desc: &[u32; 16]) {
+    PLACED_UAVS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    static SEEN: std::sync::Mutex<Vec<(u64, u32, u32)>> = std::sync::Mutex::new(Vec::new());
+    let address = u64::from(desc[10]) | u64::from(desc[11]) << 32;
+    let key = (address, resource[8], desc[0]);
+    {
+        let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+        if seen.len() >= 128 || seen.contains(&key) {
+            return;
+        }
+        seen.push(key);
+    }
+    tracing::warn!(
+        mirrored = placed_uav(),
+        dimension = resource[0],
+        width = resource[4],
+        height = resource[6],
+        depth_levels = format_args!("{:#x}", resource[7]),
+        format = resource[8],
+        flags = format_args!("{:#x}", resource[12]),
+        view_format = desc[0],
+        view_dimension = desc[1],
+        view_mip = desc[2],
+        address = format_args!("{address:#x}"),
+        sharing = crate::resource::placed_textures_at(address),
+        "unordered view of a texture the title placed itself (VICTORY_PLACED_UAV=1 makes it; else its stores are lost)"
+    );
 }
 
 /// With `VICTORY_NULL_MAGENTA=1`, a 2D colour texture view that shows

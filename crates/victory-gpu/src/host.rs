@@ -6939,6 +6939,42 @@ impl HostList {
         }
     }
 
+    /// With `VICTORY_PLANE_NOW=1`, before a draw or dispatch is bound: the
+    /// depth planes whose twins earlier commands of the list wrote are
+    /// given the twins now, instead of when the list closes, so that what
+    /// follows in the same list (a reflection or a depth pyramid reading the
+    /// scene depth after a pass that writes it) does not see the plane as it
+    /// was (`late` uses, counted in the frame line as "used before the
+    /// pass"). True if a pass was recorded: it set its own heap, root
+    /// signature, pipeline, target, viewport and scissor, which the caller
+    /// sets back to the title's ([`crate::draw::State::replay`]).
+    pub(crate) fn planes_now(&self) -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*ON.get_or_init(|| std::env::var_os("VICTORY_PLANE_NOW").is_some_and(|v| v == "1")) {
+            return false;
+        }
+        let mut twins = self.twins.lock().unwrap_or_else(|e| e.into_inner());
+        let due: Vec<_> = twins
+            .values_mut()
+            .filter(|u| u.behind[0] == Some(true) && u.twin.plane.is_some())
+            .map(|u| {
+                u.behind[0] = Some(false);
+                u.late = false;
+                (u.depth.clone(), u.twin.clone())
+            })
+            .collect();
+        drop(twins);
+        for (depth, twin) in &due {
+            self.twin_copy(depth, twin, false);
+            self.pass_plane(depth, twin);
+        }
+        if !due.is_empty() {
+            static FIRST: std::sync::Once = std::sync::Once::new();
+            FIRST.call_once(|| tracing::info!(n = due.len(), "depth planes given their twins in the list, before the next command (VICTORY_PLANE_NOW=1)"));
+        }
+        !due.is_empty()
+    }
+
     /// A draw or dispatch being prepared writes title texture `resource`
     /// through unordered access: if it is of a kind copied back
     /// ([`crate::texback`]), the list copies it when it closes.
@@ -8940,7 +8976,7 @@ impl Meter {
                  {copy_mb:.1} MB, textures {texture_ms:.1} ms {texture_mb:.1} MB; {gpu:.1} on the \
                  GPU; {back_ms:.1} copying back {back_mb:.1} MB), {draws:.0} draws/frame, \
                  dropped {dropped:.0} without a host pipeline ({making} being made) and \
-                 {indirect:.0} indirect; heap buffers {picked:.1} passes {picked_ms:.1} ms;                  texture slots written so far: {placed} placed, {objects} of objects; \
+                 {indirect:.0} indirect; heap buffers {picked:.1} passes {picked_ms:.1} ms;                  texture slots written so far: {placed} placed, {objects} of objects, {placed_uavs} placed unordered; \
                  textures picked by index: {picked_textures} uploaded so far ({picked_mb} MB), \
                  {picked_waiting} waiting, {picked_away} passed over unmapped; depth textures with                  unordered access: {du0} made, bound as depth {du1}x, cleared as depth {du2}x,                  unordered views refused {du3}x; buffer views left null as the host would refuse them: {refused}",
                 picked_textures = crate::draw::HEAP_TEXTURES.load(Ordering::Relaxed),
@@ -8961,7 +8997,8 @@ impl Meter {
                 ),
                 making = crate::pipeline::making(),
                 placed = crate::descriptor::host::PLACED_TEXTURE_SLOTS.load(Ordering::Relaxed),
-                objects = crate::descriptor::host::OBJECT_TEXTURE_SLOTS.load(Ordering::Relaxed)
+                objects = crate::descriptor::host::OBJECT_TEXTURE_SLOTS.load(Ordering::Relaxed),
+                placed_uavs = crate::descriptor::host::PLACED_UAVS.load(Ordering::Relaxed)
             );
             #[cfg(feature = "diagnostics")]
             {

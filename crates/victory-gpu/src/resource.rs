@@ -2758,6 +2758,14 @@ pub(crate) fn first_mip(view: &[u32]) -> u32 {
     }
 }
 
+/// How many placed-texture resources were made for memory at `address`
+/// (one per description seen there).
+#[cfg(windows)]
+pub(crate) fn placed_textures_at(address: u64) -> usize {
+    let map = PLACED_TEXTURES.lock().unwrap_or_else(|e| e.into_inner());
+    map.range((address, [0; 14])..=(address, [u32::MAX; 14])).count()
+}
+
 /// The resource for a texture placed at `address` with the resource
 /// description `desc` (as words), made on first use.
 #[cfg(windows)]

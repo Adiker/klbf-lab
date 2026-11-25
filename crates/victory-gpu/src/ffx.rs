@@ -486,6 +486,7 @@ pub extern "C" fn ffxDispatch(context: *mut *mut c_void, desc: *const Header) ->
     }
     // SAFETY: a description of this type.
     let mut d = unsafe { *desc.cast::<DispatchUpscale>() };
+    trace_dispatch(&d);
     let title_list = d.command_list as This;
     let Some(list) = crate::list::host_list(title_list) else {
         return ERROR_PARAMETER;
@@ -589,6 +590,35 @@ pub extern "C" fn ffxDispatch(context: *mut *mut c_void, desc: *const Header) ->
         tracing::info!(render = ?d.render_size, upscale = ?d.upscale_size, result = r, ?input, ?output, format, packed = packed_output.is_some(), "ffx: first upscale recorded on the host GPU");
     });
     r
+}
+
+/// What the title hands each upscale, for exposure and camera questions:
+/// the first dispatch always; with `VICTORY_FFX_TRACE=<n>`, every n-th
+/// (its pre-exposure follows the title's own exposure: a value that swings
+/// says the title's exposure swings before the upscaler sees it).
+fn trace_dispatch(d: &DispatchUpscale) {
+    static EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let every = *EVERY.get_or_init(|| std::env::var("VICTORY_FFX_TRACE").ok().and_then(|v| v.parse().ok()).unwrap_or(0));
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if n != 0 && (every == 0 || n % every != 0) {
+        return;
+    }
+    tracing::info!(
+        n,
+        pre_exposure = d.pre_exposure,
+        exposure_texture = !d.resources[3].resource.is_null(),
+        reactive = !d.resources[4].resource.is_null(),
+        flags = d.flags,
+        reset = d.reset,
+        jitter = ?d.jitter,
+        motion_vector_scale = ?d.motion_vector_scale,
+        render = ?d.render_size,
+        upscale = ?d.upscale_size,
+        camera = ?d.camera,
+        frame_time = d.frame_time_delta,
+        "ffx: upscale inputs"
+    );
 }
 
 /// [`ffxDispatch`] in simple mode: the colour input's render rectangle
