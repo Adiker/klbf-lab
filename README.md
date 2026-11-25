@@ -27,7 +27,7 @@ No game files are included. You need your own legally obtained copy.
 
 > **Stability policy:** we never publish a build that crashed in our tests. Every session length shown here is when **we** stopped, to get back to work on the project or because a test run reached its planned end, not a crash.
 
-Speed in Lab 39 runs: median 6.6–8.4 fps in the world (720p upscaled to 1080p with AMD FSR), 14 min runs without a crash. If the device is lost about a minute after the world starts loading, try `VICTORY_LATE_WAIT=0`.
+Speed in Lab 39 runs: median 6.6–8.4 fps in the world (720p upscaled to 1080p with AMD FSR). Stability record: 77 min of play without a crash on Lab 39 (stopped by choice); it has never crashed in our test runs. If the device is lost about a minute after the world starts loading, try `VICTORY_LATE_WAIT=0`.
 
 ## What it fixes on AMD
 
