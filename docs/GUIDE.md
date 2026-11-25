@@ -108,3 +108,7 @@ Then step 6, step 7 again, and step 8.
 | Graphics card stops responding after ~1 min | `$env:VICTORY_LATE_WAIT = '0'` |
 
 Still stuck? Open an [issue](https://github.com/PastiiJay/klbf-lab/issues) with your graphics card, driver version, Windows version and the last lines PowerShell printed.
+
+---
+
+Thanks to [@HishamMuhammed](https://github.com/HishamMuhammed), whose questions shaped this guide.
