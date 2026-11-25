@@ -462,10 +462,27 @@ fn root_view(list: &HostList, address: u64, srv: bool) -> Option<u64> {
         shadow.refresh(list, address, len);
         return Some(gpu);
     }
+    // As table constant buffers (#522): bytes a flight in the air may
+    // write are copied from the host copy on the card, behind the flight,
+    // instead of filled from title memory at submission, which waits for
+    // the flight to land (`VICTORY_FILL_ON_CARD=0` fills as before).
+    if crate::host::fill_on_card()
+        && crate::host::late()
+        && crate::host::flights_write(address as usize, (address + len) as usize)
+    {
+        shadow.refresh(list, address, len);
+        if let Some(gpu) = list.card_constants(&shadow, address, len) {
+            ROOT_ON_CARD.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return Some(gpu);
+        }
+    }
     let (gpu, to) = list.scratch(len)?;
     list.defer_fill(to, address as *const u8, len as usize);
     Some(gpu)
 }
+
+/// Root constant buffers filled on the card behind flights ([`root_view`]).
+pub(crate) static ROOT_ON_CARD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 macro_rules! once {
     ($($arg:tt)*) => {{

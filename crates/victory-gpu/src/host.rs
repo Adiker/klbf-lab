@@ -2468,6 +2468,30 @@ fn touches_other(
             .any(|&(owner, a, b)| owner != copy && a < to && b > from)
 }
 
+/// `VICTORY_SETTLE_DIAG=1`: the first 80 settles a fill or buffer copy
+/// causes, with what it reads and which copy holds that memory.
+fn settle_diag(what: &str, src: usize, dst: usize, len: usize) {
+    static ON: OnceLock<bool> = OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("VICTORY_SETTLE_DIAG").is_some_and(|v| v == "1")) {
+        return;
+    }
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if N.fetch_add(1, Ordering::Relaxed) >= 80 {
+        return;
+    }
+    let copy = crate::shadow::find(src as u64, len as u64).map(|s| {
+        let (a, l) = s.span();
+        format!("{a:#x}+{l:#x}")
+    });
+    tracing::info!(
+        src = format_args!("{src:#x}"),
+        dst = format_args!("{dst:#x}"),
+        len,
+        copy = ?copy,
+        "settle diag: a {what} reads what a flight writes"
+    );
+}
+
 /// `ranges` with `more`, in order, joined where they overlap or touch.
 fn join_ranges(ranges: &mut Vec<(usize, usize)>, more: impl IntoIterator<Item = (usize, usize)>) {
     ranges.extend(more.into_iter().filter(|r| r.0 < r.1));
@@ -2547,11 +2571,13 @@ fn blocked_by_steps<'a>(
             &Step::Copy(dst, src, len) => {
                 if read_stat.is_none() && (any_written(src, src + len) || any_written(dst, dst + len)) {
                     read_stat = Some(Some(15));
+                    settle_diag("buffer copy", src, dst, len);
                 }
             }
-            &Step::Fill(_, src, len) => {
+            &Step::Fill(dst, src, len) => {
                 if read_stat.is_none() && any_written(src, src + len) {
                     read_stat = Some(Some(16));
+                    settle_diag("fill", src, dst, len);
                 }
             }
             Step::Texture(staging) => {
