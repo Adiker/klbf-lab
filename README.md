@@ -48,7 +48,7 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 | Jason's first mission ("Gone Fishing"): the boat | 🟡 passed by skipping | 6.3 / 9.8 | the boat sits on the seabed and does not move, so the chase fails; after 3 failed tries the game offers to skip the checkpoint |
 | "Gone Fishing": on foot in the swamp, the camp, finding Donnie | ✅ | 5.2 average / 12.9 peak (whole 41 min session, test build Lab 38) | first fight works; in the water the character stands on the bottom and cannot climb out (same cause as the boat) |
 | "Gone Fishing": the seaplane and the landing | 🟡 reached | (same session) | the seaplane stays under water and its engine is destroyed; skipping after 3 failures got past take-off, the landing sends back to the previous checkpoint |
-| Further | ⏳ next | — | needs the water fix (cause found, see below) |
+| Further | ⏳ next | — | water fixed in test build Lab 39 (see below); full play-through next |
 
 ### Milestones
 
@@ -65,9 +65,11 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 
 How we measure: the frame rate the layer logs about every 5 s, in the world only (loading screens and the first 2 minutes of shader compiling left out). Numbers are given per scene: standing in the prison cell, and while actually playing through the prologue and Jason's first mission (18 min session, test build Lab 37). Lows are taken from those 5 s averages, so single-frame dips may go lower.
 
-### Water: cause found
+### Water: fixed in test build Lab 39
 
-Boats, the seaplane and the player in water all behave as if there were no water: the boat rests on the seabed, the seaplane "flies" under the surface. The water itself is drawn right. We think the cause is this: on console the CPU and the GPU share memory, and the game's physics reads back the water height the GPU computes each frame; in our layer that result stayed on the graphics card, so the physics read an empty height map. The next build copies those water textures back into the game's memory (ported from Geckomacabre/vx-layer); it is being tested now.
+In test build Lab 39 ([KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta/tree/klbf-amd)) the boat in Jason's first mission **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank. It will come to this version once it has been played through.
+
+Boats, the seaplane and the player in water all behave as if there were no water: the boat rests on the seabed, the seaplane "flies" under the surface. The water itself is drawn right. We think the cause is this: on console the CPU and the GPU share memory, and the game's physics reads back the water height the GPU computes each frame; in our layer that result stayed on the graphics card, so the physics read an empty height map. The next build copies those water textures back into the game's memory (ported from Geckomacabre/vx-layer); fixed in test build Lab 39, together with the XOR swizzle mode the height map is stored in (ported from MiamiGame/XTP).
 
 > [!TIP]
 > Until the water fix is out: when a water checkpoint fails, fail it **3 times** and the game offers to skip it.
