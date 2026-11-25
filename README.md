@@ -4,14 +4,13 @@
   <img src="https://img.shields.io/badge/version-Lab%2035-1f46c8" alt="version: Lab 35">
   <img src="https://img.shields.io/badge/prologue-~7%20fps-1f46c8" alt="prologue: about 7 fps">
   <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
-  <a href="https://github.com/PastiiJay/klbf-lab-beta"><img src="https://img.shields.io/github/stars/PastiiJay/klbf-lab-beta?label=KLBF%20Lab%20Beta%20stars&color=555" alt="KLBF Lab Beta stars"></a>
 </p>
 
 <p align="center"><b>Played from a new game to the open world: Lucia's prologue and Jason's first mission ("Gone Fishing") completed, free roam from Jason's house, on an AMD Radeon RX 9070 XT.</b></p>
 
 An open lab that runs the Xbox Series X|S (Scarlett) build of the game natively on a Windows PC: a GDK compatibility layer (`kernelx`, `xgameruntime`, `d3d12_xs` → host D3D12, RDNA2 → DXIL shader translation) that combines the best fixes from open compatibility projects into one tested build. Our own fixes (AMD Radeon stability and rendering, water physics, pre-building pipelines, optional AMD FSR frame generation) and fixes from other contributors, credited below.
 
-This is the one version we recommend. It is meant for every graphics card; so far we have tested it on an AMD Radeon RX 9070 XT, and reports from other cards (NVIDIA, Intel, other AMD) are very welcome. New builds are tried first in **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, the test lab, where issues and test reports go.
+This is the one version we recommend. It is meant for every graphics card; so far we have tested it on an AMD Radeon RX 9070 XT, and reports from other cards (NVIDIA, Intel, other AMD) are very welcome. New builds are tried first on the **[`beta` branch](https://github.com/PastiiJay/klbf-lab/tree/beta)** of this repository (test builds); issues and test reports go in [this repository's issues](https://github.com/PastiiJay/klbf-lab/issues).
 
 ## Status (2026-11-25, Lab 35)
 
@@ -70,7 +69,7 @@ How we measure: the frame rate the layer logs about every 5 s, in the world only
 
 ### Water physics: fixed in test build Lab 39
 
-In test build Lab 39 ([KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta/tree/klbf-amd)) the boat in Jason's first mission **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank. The fix has also been confirmed by another user on an NVIDIA GeForce RTX 5070 Ti (16 GB), in their own build. Our own play-through on Lab 39: the boat, the seaplane take-off and flight (~9 fps) and the water landing all work. It will come to this version once the mission has been played to its end.
+In test build Lab 39 (the [`beta` branch](https://github.com/PastiiJay/klbf-lab/tree/beta)) the boat in Jason's first mission **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank. The fix has also been confirmed by another user on an NVIDIA GeForce RTX 5070 Ti (16 GB), in their own build. Our own play-through on Lab 39: the boat, the seaplane take-off and flight (~9 fps) and the water landing all work. It will come to this version once the mission has been played to its end.
 
 Boats, the seaplane and the player in water all behave as if there were no water: the boat rests on the seabed, the seaplane "flies" under the surface. The water itself is drawn right. We think the cause is this: on console the CPU and the GPU share memory, and the game's physics reads back the water height the GPU computes each frame; in our layer that result stayed on the graphics card, so the physics read an empty height map. The next build copies those water textures back into the game's memory (ported from Geckomacabre/vx-layer); fixed in test build Lab 39, together with the XOR swizzle mode the height map is stored in (ported from MiamiGame/XTP).
 
@@ -79,7 +78,7 @@ Boats, the seaplane and the player in water all behave as if there were no water
 
 ## Community and test reports
 
-This repository is new (25 Nov 2026), but the project is older: it started on **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, where every build is tried first: **13 stars and 2 forks** there on 25 Nov 2026, plus the test reports below. Reports from other testers there:
+The project started on **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)** (13 stars, 2 forks), now archived: test builds moved to this repository's `beta` branch on 25 Nov 2026. Reports from testers there:
 
 - [RX 6900 XT (RDNA2), Windows 10](https://github.com/PastiiJay/klbf-lab-beta/issues/2): runs our builds for 19 min without a device removal; with Lab 33 the player's face renders on that card too; it helped us test two fixes.
 - [RX 6800 (RDNA2)](https://github.com/PastiiJay/klbf-lab-beta/issues/4): measured our AMD fixes on that card (same speed with them; purple sky and wet-looking skin gone).
@@ -149,7 +148,7 @@ If the device is lost about a minute after the world starts loading (reported on
 
 `VICTORY_SHADER_OPT=0` turns off the fork's shader clean-up passes, which crashed the AMD compiler for us. `VICTORY_TEXTURE_BUDGET_MB=6144` fixed some dark textiles for another tester but hid the cell walls in both our runs with it, so we leave it off for now. 
 
-Please report results in an [issue](https://github.com/PastiiJay/klbf-lab-beta/issues): GPU, driver, how long it ran, fps in the window title, and what looks wrong. Patch notes: [CHANGELOG.md](CHANGELOG.md). Full run log: [docs/klbf/results.md](docs/klbf/results.md).
+Please report results in an [issue](https://github.com/PastiiJay/klbf-lab/issues): GPU, driver, how long it ran, fps in the window title, and what looks wrong. Patch notes: [CHANGELOG.md](CHANGELOG.md). Full run log: [docs/klbf/results.md](docs/klbf/results.md).
 
 ## Credits
 
