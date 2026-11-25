@@ -1,19 +1,20 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab 35 — AMD test branch</h1>
+<h1 align="center">KLBF Lab</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/test-Lab%2035-ff7a00" alt="test: Lab 35">
-  <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
-  <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
-  <img src="https://img.shields.io/badge/stable-7.3%20fps%20(Series%20S%20%2B%20FSR)-ff7a00" alt="7.3 fps stable, Series S + FSR">
+  <img src="https://img.shields.io/badge/version-Lab%2035-1f46c8" alt="version: Lab 35">
+  <img src="https://img.shields.io/badge/~7%20fps-in%20game-1f46c8" alt="about 7 fps in game">
+  <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
 </p>
 
-This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the latest [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (25 Nov 2026, including triippywhale's AMD view-heap clamp and the skin/hair texture re-check; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab). Previous test builds are kept as the tags `klbf-lab-33`, `klbf-lab-31`, `klbf-lab-28` and `klbf-lab-26`.
+An open lab that runs a modern Xbox Series title natively on a Windows PC by combining the best fixes from every open compatibility project into one tested build. It builds on [VIctory](https://github.com/Marvisak/VIctory) and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (all rendering work there is its authors', see [README.fxceless.md](README.fxceless.md)), with fixes found on our own machine and fixes from other contributors, credited below.
+
+This is the one version we recommend. It is meant for every graphics card; so far we have tested it on an AMD Radeon RX 9070 XT, and reports from other cards (NVIDIA, Intel, other AMD) are very welcome. New builds are tried first in **[KLBF Lab Beta](https://github.com/PastiiJay/klbf-lab-beta)**, the test lab, where issues and test reports go.
 
 No game files are included. You need your own legally obtained copy.
 
-## What it fixes on AMD
+## What it fixes
 
-| Problem on AMD | Cause we found | In this branch |
+| Problem | Cause we found | Fix |
 |---|---|---|
 | Memory grows ~240 MB/s until Windows runs out | compute shader `39f0e9aeb156a61c` never leaves the AMD driver's compiler | skipped |
 | Purple/magenta blocks stuck on screen | console 32-lane pixel shaders run in 64-lane waves on AMD; NaN piled up in temporal buffers | 32-lane programs run per half wave; NaN/Inf filtered on colour outputs |
@@ -25,13 +26,13 @@ No game files are included. You need your own legally obtained copy.
 | Walls, window frame and outfit wrong for a whole run, at random | during loading the list of remapped texture ranges overflowed and was thrown away, so which textures got re-checked depended on timing | the list is 32× larger and an overflow triggers a full re-check instead of a drop (found by comparing logs of runs with and without walls) |
 | The AMD shader compiler crashes (`amdxc64.dll`) on a few pipelines | driver bug on two pipelines | `victory translate --cache --pipelines` pre-builds every pipeline offline, saves as it goes, finds the crashing ones and skips them in game too |
 
-## What you can expect (RX 9070 XT, Adrenalin 32.0.32029.2010, Series X mode)
+## What you can expect (tested on an RX 9070 XT, Adrenalin 32.0.32029.2010)
 
 | | Result |
 |---|---|
 | First cell | walls, window frame, posters and photos drawn; Lucia's face, hair and orange outfit render; inmates in the yard |
-| Speed, Series S mode + AMD FSR (recommended) | **~7.3 fps (median), 74 min with no device removal**, walls drawn throughout |
-| Speed, Series X mode | ~4.8–5.2 fps (≈200 ms/frame); 41 min with no device removal (Lab 33) |
+| Speed, recommended settings (720p upscaled to 1080p with AMD FSR) | **~7.3 fps (median), 74 min with no device removal**, walls drawn throughout |
+| Speed, native resolution without FSR | ~4.8–5.2 fps (≈200 ms/frame); 41 min with no device removal (Lab 33) |
 | Skipped shaders | only one left (`39f0e9aeb156a61c`, which never leaves the AMD compiler); the other 47 we used to skip now run on this card |
 | Cell walls | drawn in 5 of 6 runs (about half before Lab 35). When they are missing, the window frame turns purple and the outfit dark for the whole run; still under investigation |
 | Still wrong | a purple tint on some papers and photos, stretched "web" triangles around some characters that change every frame, some textiles look wet, colour banding in skies |
@@ -57,10 +58,13 @@ $env:VICTORY_LATE_WAIT = '1'
 $env:VICTORY_WIDE_BACK = '1'
 $env:VICTORY_PIPELINE_WAIT_MS = '24'
 $env:VICTORY_RELAY_COPY_QUEUE = '0'
-target\release\victory.exe run <game dir>\<the title's exe> --execute
+$env:VICTORY_FFX_DIR = '<FidelityFX SDK>\Kits\FidelityFX\signedbin'
+target\release\victory.exe run --console series-s <game dir>\<the title's exe> --execute
 ```
 
-`VICTORY_SHADER_OPT=0` turns off the fork's shader clean-up passes, which crashed the AMD compiler for us. `VICTORY_TEXTURE_BUDGET_MB=6144` fixed some dark textiles for another tester but hid the cell walls in both our runs with it, so we leave it off for now. **Faster: Series S mode with AMD FSR.** Add `--console series-s` after `run`, and point `VICTORY_FFX_DIR` at the `signedbin` folder of AMD's official [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) (`$env:VICTORY_FFX_DIR = '<sdk>\Kits\FidelityFX\signedbin'`). The game renders at 1280×720 and FSR upscales it to 1920×1080: ~7.3 fps over 74 min here. Without FSR the Series S picture stays black.
+`--console series-s` makes the title render at 1280×720, and AMD FSR (from the official [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK)) upscales it to 1920×1080: that is the ~7 fps setting. Without `--console series-s` the title renders at its native resolution (~5 fps here).
+
+`VICTORY_SHADER_OPT=0` turns off the fork's shader clean-up passes, which crashed the AMD compiler for us. `VICTORY_TEXTURE_BUDGET_MB=6144` fixed some dark textiles for another tester but hid the cell walls in both our runs with it, so we leave it off for now. 
 
 Please report results in an [issue](https://github.com/PastiiJay/klbf-lab-beta/issues): GPU, driver, how long it ran, fps in the window title, and what looks wrong. Patch notes: [CHANGELOG.md](CHANGELOG.md). Full run log: [docs/klbf/results.md](docs/klbf/results.md).
 
