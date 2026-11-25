@@ -25,7 +25,7 @@ use windows::Win32::Graphics::Direct3D::ID3DBlob;
 use windows::Win32::Graphics::Direct3D12::*;
 use windows::core::s;
 
-use crate::host::{HostList, host, transition};
+use crate::host::{BUFFER_READ, HostList, host, transition};
 
 const SOURCE: &str = r#"
 #define RS "RootConstants(num32BitConstants=6, b0), SRV(t0), SRV(t1), UAV(u0), UAV(u1)"
@@ -85,7 +85,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         // Mesh dispatches: the console's are one-dimensional.
         uint3 g = src_args.Load3(src_at);
         // Ahead of its draw, a record over the most a dispatch runs is a
-        // slot the title has not filled (Grand Theft Auto VI leaves all
+        // slot the title has not filled (the title leaves all
         // ones there): empty, and not counted below either.
         if (ahead && g.x > 65535u) {
             g = uint3(0, 0, 0);
@@ -252,6 +252,7 @@ pub(crate) fn bound(
 ) -> Option<ID3D12Resource> {
     let bytes = validate_layout(spec, src.1, count.map(|(_, off)| off))?;
     let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
+    sources_read(list, src, count);
     record_clamp(c, &list.list, &dst, budget, src, count, spec).then_some(dst)
 }
 
@@ -272,7 +273,18 @@ pub(crate) fn bound_ahead(
 ) -> Option<ID3D12Resource> {
     let bytes = validate_layout(spec, src.1, None)?;
     let (c, budget, dst) = (clamp()?, list.budget()?, list.indirect_scratch(bytes)?);
+    sources_read(list, src, None);
     record_clamp_as(c, &list.list, &dst, budget, src, None, spec, true).then_some(dst)
+}
+
+/// The clamp is a command of its own that reads the title's arguments and
+/// count from their host copies (upstream VIctory #334's state tracking).
+fn sources_read(list: &HostList, src: (&ID3D12Resource, u64), count: Option<(&ID3D12Resource, u64)>) {
+    list.begin_command();
+    list.buffer_state(src.0, BUFFER_READ);
+    if let Some((c, _)) = count {
+        list.buffer_state(c, BUFFER_READ);
+    }
 }
 
 fn record_clamp(
@@ -345,8 +357,8 @@ fn record_clamp_as(
     };
     let constants = [kind, stride, records, args_offset, has_count | (u32::from(ahead) << 1), count_offset];
     // SAFETY: an open list; our root signature and pipeline; live source,
-    // count, scratch destination, and budget buffers. `src` and `count` stay
-    // in `COMMON` / `GENERIC_READ` via implicit buffer promotion while `dst`
+    // count, scratch destination, and budget buffers. `src` and `count` are
+    // in `GENERIC_READ` (`sources_read`, host lists) while `dst`
     // transitions `COMMON -> UNORDERED_ACCESS -> INDIRECT_ARGUMENT`.
     // Diagnostics: counted; `VICTORY_BARRIER_TEST=indirect` leaves the two
     // waits for every earlier shader write out (the state changes stay).
@@ -690,7 +702,7 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-                warp.list.Dispatch(PIECES.div_ceil(64), 1, 1);
+                warp.list.Dispatch(PIECES, 1, 1);
             }
             warp.submit_and_wait();
             // SAFETY: as above.
@@ -718,6 +730,39 @@ void main() {
         set(content[at]);
         assert_eq!(run(&mut warp, 2), [0, 1, 0]);
         assert_eq!(run(&mut warp, 2), [0, 0, 0]);
+        // Every lane's slice is hashed: first byte of piece 0 (lane 0),
+        // last byte of piece 2 (lane 63), and swapping two 16-byte blocks
+        // across lanes in piece 1 must all be detected.
+        for &(offset, expected) in &[
+            (0usize, [1, 0, 0]),
+            (PIECE * 3 - 1, [0, 0, 1]),
+            (63 * 16 + 7, [1, 0, 0]),
+        ] {
+            // SAFETY: offset is inside the mapped buffer.
+            unsafe { now_ptr.add(offset).write_volatile(content[offset] ^ 0x01) };
+            assert_eq!(run(&mut warp, 1), expected);
+            // SAFETY: restore original byte.
+            unsafe { now_ptr.add(offset).write_volatile(content[offset]) };
+            assert_eq!(run(&mut warp, 1), [0, 0, 0]);
+        }
+        // Swap lane 0's first 16 bytes with lane 1's first 16 bytes in piece 1.
+        // SAFETY: both 16-byte blocks are inside piece 1 of the mapped buffer.
+        unsafe {
+            std::ptr::copy_nonoverlapping(content[PIECE + 16..PIECE + 32].as_ptr(), now_ptr.add(PIECE), 16);
+            std::ptr::copy_nonoverlapping(content[PIECE..PIECE + 16].as_ptr(), now_ptr.add(PIECE + 16), 16);
+        }
+        assert_eq!(run(&mut warp, 1), [0, 1, 0]);
+        // Restore piece 1, then flip the sign bit of the first u32 in both
+        // lane 0's and lane 32's final 16-byte loads of piece 0 (offsets
+        // 64,512 and 65,024). The asymmetric reduction must not let the pair
+        // cancel out.
+        // SAFETY: all offsets are inside the mapped buffer.
+        unsafe {
+            std::ptr::copy_nonoverlapping(content[PIECE..PIECE + 32].as_ptr(), now_ptr.add(PIECE), 32);
+            now_ptr.add(64_512 + 3).write_volatile(content[64_512 + 3] ^ 0x80);
+            now_ptr.add(65_024 + 3).write_volatile(content[65_024 + 3] ^ 0x80);
+        }
+        assert_eq!(run(&mut warp, 1), [1, 0, 0]);
     }
 
     /// The clamp compiles with the system's compiler and the host takes it.

@@ -40,7 +40,7 @@ impl Source<'_> {
 pub(crate) fn sources(data: &[u8]) -> Vec<Source<'_>> {
     let mut out: Vec<Source<'_>> = Vec::new();
     if sgd5::is_sgd5(data) {
-        out.extend(sgd5::records(data).map(Source::Packed));
+        out.extend(sgd5::records(data).into_iter().map(Source::Packed));
     }
     let raw = memchr::memmem::find_iter(data, b"DXBC")
         .filter(|&offset| Container::parse(&data[offset..]).is_ok())

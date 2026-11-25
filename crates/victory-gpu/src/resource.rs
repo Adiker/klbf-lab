@@ -178,8 +178,8 @@ fn footprint(desc: &ResourceDesc) -> Option<AllocationInfo> {
         && let Some(t) = texture_layout(desc)
     {
         // As the console: the layout's own alignment unless more is asked
-        // (4 KiB for 4 KiB modes, where PC says 64 KiB). Grand Theft Auto
-        // VI keeps these sizes in its texture tables, and its streaming
+        // (4 KiB for 4 KiB modes, where PC says 64 KiB).
+        // The title keeps these sizes in its texture tables, and its streaming
         // asserts when they disagree with the streamed layout.
         let alignment = desc.alignment.max(t.alignment);
         if !alignment.is_power_of_two() {
@@ -239,27 +239,29 @@ pub(crate) fn pc_format(format: u32) -> u32 {
 
 /// The format of a texture the host GPU renders to or writes as unordered
 /// access, for the title's `format`. The console's GPU does both with the
-/// 16-bit colour formats B5G5R5A1 (86) and B4G4R4A4 (115), and Grand Theft
-/// Auto VI has full-screen targets in both; a host that refuses either use
+/// 16-bit colour formats B5G5R5A1 (86) and B4G4R4A4 (115), and
+/// the title has full-screen targets in both; a host that refuses either use
 /// (NVIDIA) refused the whole texture, so every pass that wrote it drew
 /// nothing. There 8-bit RGBA stands in: the same channels in the same
 /// order, every 4-bit level exact and every 5-bit level within 1/510.
+/// The title also renders to R9G9B9E5 (67), which no PC GPU does: 16-bit
+/// float RGBA stands in, with at least R9G9B9E5's precision and range.
 /// The title's pipelines and views of such targets name the stand-in too
 /// ([`view_format`], the host view checks).
 /// shortcut: copies between such a target and a texture the title fills
 /// itself in the 16-bit format are skipped ([`stands_in`]); convert them
 /// if a pass turns out to need one.
 pub(crate) fn target_format(format: u32) -> u32 {
-    const STAND_INS: [(u32, u32); 2] = [(86, 28), (115, 28)];
+    const STAND_INS: [(u32, u32); 3] = [(86, 28), (115, 28), (67, 10)];
     let Some(i) = STAND_INS.iter().position(|&(f, _)| f == format) else {
         return format;
     };
     #[cfg(windows)]
     {
         use windows::Win32::Graphics::Direct3D12::*;
-        static REFUSED: std::sync::OnceLock<[bool; 2]> = std::sync::OnceLock::new();
+        static REFUSED: std::sync::OnceLock<[bool; 3]> = std::sync::OnceLock::new();
         let refused = REFUSED.get_or_init(|| {
-            STAND_INS.map(|(f, _)| {
+            STAND_INS.map(|(f, to)| {
                 let Some(host) = crate::host::host() else {
                     return false;
                 };
@@ -279,7 +281,11 @@ pub(crate) fn target_format(format: u32) -> u32 {
                     | D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW.0;
                 let refused = asked.is_err() || support.Support1.0 & both != both;
                 if refused {
-                    tracing::info!(format = f, "the host does not render to this format: 8-bit RGBA stands in");
+                    tracing::info!(
+                        format = f,
+                        stand_in = to,
+                        "the host does not render to this format: a stand-in is used"
+                    );
                 }
                 refused
             })
@@ -327,8 +333,8 @@ pub(crate) fn depth_and_unordered(this: This) -> bool {
 /// when a side is used after the other was written
 /// (`HostList::twin_use`).
 /// shortcut: whole textures are copied, not the mips and slices written.
-/// A depth texture with a stencil plane gets a twin for each plane (Grand
-/// Theft Auto VI's tiled lighting writes each pixel's material class into
+/// A depth texture with a stencil plane gets a twin for each plane (
+/// the title's tiled lighting writes each pixel's material class into
 /// the depth plane and masks into the stencil plane, then draws each class
 /// with the depth test "equal"): the stencil plane's is copied through a
 /// buffer, the depth plane's is drawn into the plane by a pass of ours
@@ -921,7 +927,7 @@ static ALLOCATOR: std::sync::OnceLock<(AllocRoutine, FreeRoutine)> = std::sync::
 
 /// Committed resources get their memory from the title's general
 /// allocator, as on the console, where titles hook it to place graphics
-/// memory themselves (Grand Theft Auto VI places its back buffers in a
+/// memory themselves (the title places its back buffers in a
 /// block of its own and checks they fill it). The runtime names it before
 /// the device exists.
 pub fn use_allocator(alloc: AllocRoutine, free: FreeRoutine) {
@@ -1108,6 +1114,8 @@ struct Resource {
     /// access, the colour texture shaders write instead ([`Twin`]).
     #[cfg(windows)]
     host: Hosted,
+    #[cfg(windows)]
+    fsr_output: std::sync::OnceLock<Option<Box<crate::ffx::rgb9e5::Output>>>,
 }
 
 /// A title texture's host copy and the state it is in. The title's barriers
@@ -1133,7 +1141,7 @@ pub(crate) struct HostTexture {
 type Made = (std::sync::Arc<HostTexture>, Option<std::sync::Arc<Twin>>);
 
 /// A title texture's host side. The host copy is made when something first
-/// uses the texture, not when the title creates it: Grand Theft Auto VI
+/// uses the texture, not when the title creates it: the title
 /// had created 3,871 textures (9.2 GB on the host) before its world's first
 /// frame, of which a frame's lists name some hundreds (run 23), on a card
 /// with 12 GB. A title texture is memory the title has either way; its host
@@ -1189,7 +1197,7 @@ static TARGETS_AT: std::sync::Mutex<std::collections::BTreeMap<u64, usize>> =
 /// same memory, if there is one of the same size, levels and layers with
 /// texels of the same width. The console reads such a texture through the
 /// view as it is
-/// (Grand Theft Auto VI packs light as R9G9B9E5 into R32_UINT textures
+/// (the title packs light as R9G9B9E5 into R32_UINT textures
 /// with compute shaders, which cannot write R9G9B9E5, and samples them
 /// through R9G9B9E5 views placed at the textures' addresses: the sky, the
 /// sky and light probes, the bounced light the lighting pass adds). On the
@@ -1303,7 +1311,7 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             .clear
             .as_ref()
             .map_or(std::ptr::null(), |c| std::ptr::from_ref(c).cast::<c_void>());
-        let Some(texture) = host_texture(&r.desc, r.host.state, clear) else {
+        let Some(texture) = host_texture(&r.desc, r.host.state, clear, r.data() as usize) else {
             r.host.refused.store(true, Relaxed);
             return None;
         };
@@ -1605,6 +1613,33 @@ pub(crate) fn host_resource<'a>(
     Some(unsafe { &*std::ptr::from_ref(&host.texture) })
 }
 
+#[cfg(windows)]
+pub(crate) fn rgb9e5_fsr_output(this: This) -> Option<&'static crate::ffx::rgb9e5::Output> {
+    let resource = resource(this);
+    if !resource.desc.rgb9e5_fsr_candidate() {
+        return None;
+    }
+    let texture = host_copy(this)?;
+    resource
+        .fsr_output
+        .get_or_init(|| crate::ffx::rgb9e5::Output::new(&texture.texture).map(Box::new))
+        .as_deref()
+}
+
+#[cfg(windows)]
+impl ResourceDesc {
+    fn rgb9e5_fsr_candidate(&self) -> bool {
+        use windows::Win32::Graphics::Direct3D12::*;
+        use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
+        self.format == DXGI_FORMAT_R9G9B9E5_SHAREDEXP.0 as u32
+            && self.dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D.0 as u32
+            && self.depth_or_array_size == 1
+            && self.mip_levels == 1
+            && self.sample_count == 1
+            && self.flags & 0xf == 0x5
+    }
+}
+
 /// A title texture's host copy, shared, for a list to hold.
 #[cfg(windows)]
 pub(crate) fn host_copy(this: This) -> Option<std::sync::Arc<HostTexture>> {
@@ -1621,8 +1656,10 @@ fn host_texture(
     desc: &ResourceDesc,
     state: u32,
     clear: *const c_void,
+    title_address: usize,
 ) -> Option<windows::Win32::Graphics::Direct3D12::ID3D12Resource> {
     use windows::Win32::Graphics::Direct3D12::*;
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R9G9B9E5_SHAREDEXP;
     const PC_FLAGS: u32 = 0xf; // render target, depth, UAV, no shader access
     if desc.dimension == BUFFER {
         return None;
@@ -1633,7 +1670,7 @@ fn host_texture(
     d.alignment = 0;
     d.flags &= PC_FLAGS;
     // PC refuses depth targets that are also unordered-access (the console
-    // allows both; Grand Theft Auto VI's shadow maps ask for it).
+    // allows both; the title's shadow maps ask for it).
     // The host copy loses the unordered access: shaders write a colour
     // twin instead ([`Twin`]).
     const DEPTH: u32 = 2;
@@ -1675,31 +1712,96 @@ fn host_texture(
         Type: D3D12_HEAP_TYPE_DEFAULT,
         ..Default::default()
     };
-    let mut texture: Option<ID3D12Resource> = None;
-    // SAFETY: the description has the host layout (checked size, same
-    // fields); the out pointer is ours.
-    let made = unsafe {
-        host.device.CreateCommittedResource(
-            &heap,
-            D3D12_HEAP_FLAG_NONE,
-            (&raw const d).cast(),
-            D3D12_RESOURCE_STATES(
-                crate::host::legal_for(d.flags, crate::host::texture_state(state)) as i32,
-            ),
-            // The same layout: format, then color or depth and stencil.
-            clear_value.as_ref().map(|v| std::ptr::from_ref(v).cast()),
-            &mut texture,
-        )
+    let allocate = |d: &ResourceDesc, clear: Option<&[u32; 5]>| {
+        let mut texture: Option<ID3D12Resource> = None;
+        // SAFETY: the description and clear value have the host layout.
+        unsafe {
+            host.device.CreateCommittedResource(
+                &heap,
+                D3D12_HEAP_FLAG_NONE,
+                std::ptr::from_ref(d).cast(),
+                D3D12_RESOURCE_STATES(
+                    crate::host::legal_for(d.flags, crate::host::texture_state(state)) as i32,
+                ),
+                clear.map(|v| std::ptr::from_ref(v).cast()),
+                &mut texture,
+            )
+        }?;
+        if let Some(t) = &texture {
+            crate::host::name(t, || {
+                format!("texture {}x{} f{} flags {:#x}", d.width, d.height, d.format, d.flags)
+            });
+        }
+        Ok::<_, windows::core::Error>(texture)
     };
-    if let Err(e) = made {
-        tracing::warn!(error = %e, desc = ?d, "no host texture");
-    }
-    if let Some(t) = &texture {
-        crate::host::name(t, || {
-            format!("texture {}x{} f{} flags {:#x}", d.width, d.height, d.format, d.flags)
+    if d.format == DXGI_FORMAT_R9G9B9E5_SHAREDEXP.0 as u32 {
+        static SUPPORT: std::sync::OnceLock<(i32, i32)> = std::sync::OnceLock::new();
+        let (support1, support2) = *SUPPORT.get_or_init(|| {
+            let mut support = D3D12_FEATURE_DATA_FORMAT_SUPPORT {
+                Format: DXGI_FORMAT_R9G9B9E5_SHAREDEXP,
+                ..Default::default()
+            };
+            // SAFETY: the feature selector matches the initialized structure.
+            let query = unsafe {
+                host.device.CheckFeatureSupport(
+                    D3D12_FEATURE_FORMAT_SUPPORT,
+                    (&raw mut support).cast(),
+                    size_of_val(&support) as u32,
+                )
+            };
+            tracing::info!(
+                result = ?query.map_err(|e| e.code()),
+                rtv = support.Support1.contains(D3D12_FORMAT_SUPPORT1_RENDER_TARGET),
+                typed_uav = support.Support1.contains(D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW),
+                typed_store = support.Support2.contains(D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE),
+                "RGB9E5 host format support"
+            );
+            (support.Support1.0, support.Support2.0)
         });
+        let writable = support1 & D3D12_FORMAT_SUPPORT1_RENDER_TARGET.0 != 0
+            && support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW.0 != 0
+            && support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE.0 != 0;
+        let use_fallback = !writable && desc.rgb9e5_fsr_candidate() && crate::ffx::enabled();
+        // After the first rejection, avoid asking the runtime for a known
+        // unsupported resource on every allocation of the same shape.
+        use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+        static WRITABLE_REJECTED: AtomicBool = AtomicBool::new(false);
+        if !use_fallback || !WRITABLE_REJECTED.load(Relaxed) {
+            match allocate(&d, clear_value.as_ref()) {
+                Ok(texture) => return texture,
+                Err(e) => {
+                    static REPORTED: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
+                    let code = e.code().0;
+                    let mut reported = REPORTED.lock().unwrap_or_else(|e| e.into_inner());
+                    if !reported.contains(&code) {
+                        reported.push(code);
+                        tracing::warn!(hresult = %format_args!("{code:#010x}"), desc = ?d, title_address, "no host RGB9E5 texture with title flags");
+                    }
+                }
+            }
+            if !use_fallback {
+                return None;
+            }
+            WRITABLE_REJECTED.store(true, Relaxed);
+        }
+        d.flags = 0;
+        match allocate(&d, None) {
+            Ok(texture) => texture,
+            Err(e) => {
+                static FAILED: std::sync::Once = std::sync::Once::new();
+                FAILED.call_once(|| tracing::warn!(hresult = ?e.code(), desc = ?d, title_address, "no copyable host RGB9E5 texture"));
+                None
+            }
+        }
+    } else {
+        match allocate(&d, clear_value.as_ref()) {
+            Ok(texture) => texture,
+            Err(e) => {
+                tracing::warn!(error = %e, desc = ?d, "no host texture");
+                None
+            }
+        }
     }
-    texture
 }
 
 /// A texture's console memory and description; `None` for buffers.
@@ -1774,6 +1876,8 @@ fn hand_out_resource(
             gone: std::sync::atomic::AtomicBool::new(false),
             placed: std::sync::atomic::AtomicBool::new(false),
         },
+        #[cfg(windows)]
+        fsr_output: std::sync::OnceLock::new(),
     });
     // The host copy waits for the texture's first use ([`Hosted`]).
     #[cfg(windows)]
@@ -1895,7 +1999,7 @@ pub(crate) extern "system" fn create_committed(
     )
 }
 
-/// Device method 0x3f8, inferred from Grand Theft Auto VI's calls
+/// Device method 0x3f8, inferred from the title's calls
 /// (title+0x193e1b4: its back buffers, heap flag "allow display"): the
 /// committed resource creation of the enhanced-barrier interfaces,
 /// `(heap, heap flags, desc1, initial layout, clear value, protected
@@ -1958,7 +2062,7 @@ pub(crate) extern "system" fn unregister_page_pool(_: This, handle: usize) -> HR
 }
 
 /// Device method 0x428, one of the `ID3D12Device9` to `ID3D12Device11`
-/// additions. From Grand Theft Auto VI's call: a resource at a virtual
+/// additions. From the title's call: a resource at a virtual
 /// address the title mapped itself, `(address, desc1, initial barrier
 /// layout, clear value, iid, out)`, as `CreatePlacedResourceX` with
 /// enhanced barriers. GPU addresses are CPU addresses, so the resource is
@@ -2008,7 +2112,7 @@ pub(crate) extern "system" fn create_at_address(
 }
 
 /// Textures the title placed in its own memory and views without a
-/// resource object (device 0x230, Grand Theft Auto VI's streamed and
+/// resource object (device 0x230, the title's streamed and
 /// interface textures), by address and description: a resource at that
 /// address, made the first time a draw reads one.
 /// The resource is kept for the run (views and lists name its address);
@@ -2346,7 +2450,7 @@ mod tests {
         slot::<Custom>(device, 0xd0)(&mut p, device, 1, 1);
         assert_eq!(p.cpu_pages, 1, "default: not CPU-visible");
 
-        // 0x428: a buffer over memory the title owns, as GTA VI asks.
+        // 0x428: a buffer over memory the title owns, as the title asks.
         type At = extern "system" fn(
             This,
             u64,

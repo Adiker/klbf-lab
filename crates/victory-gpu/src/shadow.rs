@@ -853,7 +853,7 @@ const NOT_WATCHED: u8 = 2;
 fn first_difference(a: &[u8], b: &[u8]) -> Option<usize> {
     let whole = a.len().min(b.len()) / 8 * 8;
     let from = a[..whole]
-        .chunks_exact(8)
+        .as_chunks::<8>().0.iter()
         .zip(b[..whole].chunks_exact(8))
         .position(|(x, y)| x != y)
         .map_or(whole, |word| word * 8);
@@ -867,7 +867,7 @@ fn last_difference(a: &[u8], b: &[u8]) -> Option<usize> {
         return Some(whole + i);
     }
     let word = a[..whole]
-        .chunks_exact(8)
+        .as_chunks::<8>().0.iter()
         .zip(b[..whole].chunks_exact(8))
         .rposition(|(x, y)| x != y)?
         * 8;
@@ -2838,8 +2838,8 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
     entry.shadow.clone()
 }
 
-/// Titles also use memory outside any buffer object as GPU memory (Grand
-/// Theft Auto VI's interface vertices, from its own allocator). Such memory
+/// Titles also use memory outside any buffer object as GPU memory (
+/// the title's interface vertices, from its own allocator). Such memory
 /// gets copies of the aligned windows it touches.
 /// A window nothing names any more is let go ([`let_go_idle`]).
 /// shortcut: a window is 4 MiB however little of it is read (the memory

@@ -585,12 +585,80 @@ extern "system" fn execute(this: This, count: u32, lists: *const This) {
     }
 }
 
-/// The start of a present plane: frame token, then the plane's resources.
+/// A present plane as the console lays it out: frame token, the plane's
+/// resources, their source rectangles and placements (optional), colour
+/// space and flags. 48 bytes, so a second plane starts at +0x30.
 #[repr(C)]
 pub(crate) struct Plane {
     token: u64,
     count: u32,
     resources: *const This,
+    source_rects: *const [i32; 4],
+    placements: *const u8,
+    colour_space: u32,
+    flags: u32,
+}
+const _: () = assert!(size_of::<Plane>() == 0x30);
+
+/// The one plane and resource shown, for debugging:
+/// `VICTORY_PRESENT_PLANE=P` or `P:R`. Unset: every plane's resources, in
+/// submission order, drawn one over the other as the console composes them
+/// (a title may present a game plane and an overlay one).
+fn shown_plane() -> Option<(usize, usize)> {
+    static SHOWN: std::sync::OnceLock<Option<(usize, usize)>> = std::sync::OnceLock::new();
+    *SHOWN.get_or_init(|| {
+        let v = std::env::var("VICTORY_PRESENT_PLANE").ok()?;
+        let (p, r) = v.split_once(':').unwrap_or((&v, "0"));
+        Some((p.trim().parse().unwrap_or(0), r.trim().parse().unwrap_or(0)))
+    })
+}
+
+/// Logs the planes of a present whenever their shape changes: how many,
+/// and each plane's resources (host size and format), source rectangles,
+/// colour space and flags.
+#[cfg(windows)]
+fn log_planes(planes: &[Plane]) {
+    let mut text = String::new();
+    for (i, plane) in planes.iter().enumerate() {
+        text += &format!(
+            "[plane {i}: flags {:#x}, colour space {}, ",
+            plane.flags, plane.colour_space
+        );
+        for r in 0..plane.count as usize {
+            if plane.resources.is_null() {
+                break;
+            }
+            // SAFETY: the plane lists `count` resources.
+            let resource = unsafe { *plane.resources.add(r) };
+            match crate::resource::host_resource(resource) {
+                Some(t) => {
+                    // SAFETY: a live resource.
+                    let d = unsafe { t.GetDesc() };
+                    text += &format!("{}x{} f{}", d.Width, d.Height, d.Format.0);
+                }
+                None => text += "no host copy",
+            }
+            if !plane.source_rects.is_null() {
+                // SAFETY: when given, one rectangle per resource.
+                let [l, t, rr, b] = unsafe { *plane.source_rects.add(r) };
+                text += &format!(" from ({l},{t})-({rr},{b})");
+            }
+            if !plane.placements.is_null() {
+                // SAFETY: when given, one placement per resource (read as
+                // four words; see `crate::host::Layer::place`).
+                let words = unsafe { *plane.placements.cast::<[u32; 4]>().add(r) };
+                text += &format!(" to {:?} ({words:#x?})", words.map(f32::from_bits));
+            }
+            text += "; ";
+        }
+        text += "] ";
+    }
+    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if *last != text {
+        tracing::info!(planes = planes.len(), shown = ?shown_plane(), "present planes: {text}");
+        *last = text;
+    }
 }
 /// Submission tagged with the frame it belongs to `(count, lists, frame
 /// token, flags)`; frames are paced elsewhere, so it runs as a plain one.
@@ -750,10 +818,12 @@ pub(crate) fn presented() -> u64 {
     FRAMES.load(Ordering::Relaxed)
 }
 
-/// Shows the first plane's first resource in our window.
+/// Shows the planes in our window: each plane's resources, in submission
+/// order, scaled from their source rectangles into their placements and
+/// drawn one over the other ([`crate::host::Host::present`]); or the one
+/// [`shown_plane`] names.
 ///
-/// shortcut: one plane, no scaling or placement, the source expected in
-/// the common state.
+/// shortcut: the planes' colour spaces and flags are logged, not used.
 extern "system" fn present(
     _: This,
     planes: u32,
@@ -815,25 +885,69 @@ extern "system" fn present(
         }
     }
     #[cfg(windows)]
-    if planes > 0
+    let all: &[Plane] = if planes == 0 || plane_parameters.is_null() {
+        &[]
+    } else {
         // SAFETY: the title passes `planes` plane descriptions.
-        && let Some(plane) = unsafe { plane_parameters.as_ref() }
-        && plane.count > 0
-        && !plane.resources.is_null()
-        // SAFETY: the plane lists `count` resources.
-        && let resource = unsafe { *plane.resources }
-        && let Some(texture) = crate::resource::host_resource(resource)
-        && let Some(host) = crate::host::host()
-    {
+        unsafe { std::slice::from_raw_parts(plane_parameters, planes as usize) }
+    };
+    #[cfg(windows)]
+    log_planes(all);
+    #[cfg(windows)]
+    if let Some(host) = crate::host::host() {
+        // The one resource asked for (the first plane's if there is no such
+        // plane, its last if no such resource), or all of them.
+        let only = shown_plane().map(|(p, r)| {
+            let p = if p < all.len() { p } else { 0 };
+            (p, r.min(all.get(p).map_or(0, |plane| plane.count.max(1) as usize - 1)))
+        });
         const COPY_SOURCE: u32 = 0x800;
-        let state = crate::resource::host_transition(resource, COPY_SOURCE)
-            .map_or(COPY_SOURCE, |(_, before)| before);
-        let shown = host.present(texture, state, frame);
-        crate::resource::host_transition(resource, state);
-        #[cfg(feature = "diagnostics")]
-        blinks(frame, resource, state, shown);
-        #[cfg(not(feature = "diagnostics"))]
-        let _ = shown;
+        let mut shown_resources = Vec::new();
+        let mut layers = Vec::new();
+        for (p, plane) in all.iter().enumerate() {
+            if plane.resources.is_null() {
+                continue;
+            }
+            for r in 0..plane.count as usize {
+                if only.is_some_and(|o| o != (p, r)) {
+                    continue;
+                }
+                // SAFETY: the plane lists `count` resources, and as many
+                // source rectangles and placements when it gives them.
+                let (resource, source, place) = unsafe {
+                    (
+                        *plane.resources.add(r),
+                        (!plane.source_rects.is_null()).then(|| *plane.source_rects.add(r)),
+                        (!plane.placements.is_null())
+                            .then(|| *plane.placements.cast::<[f32; 4]>().add(r)),
+                    )
+                };
+                let Some(texture) = crate::resource::host_resource(resource) else {
+                    continue;
+                };
+                // The tracked state is the copy source's while it is shown;
+                // the present moves it from the state it was in, and back.
+                let state = crate::resource::host_transition(resource, COPY_SOURCE)
+                    .map_or(COPY_SOURCE, |(_, before)| before);
+                shown_resources.push((resource, state));
+                layers.push(crate::host::Layer {
+                    texture,
+                    state,
+                    source,
+                    place,
+                });
+            }
+        }
+        if !layers.is_empty() {
+            let shown = host.present(&layers, frame);
+            for &(resource, state) in shown_resources.iter().rev() {
+                crate::resource::host_transition(resource, state);
+            }
+            #[cfg(feature = "diagnostics")]
+            blinks(frame, shown_resources[0].0, shown_resources[0].1, shown);
+            #[cfg(not(feature = "diagnostics"))]
+            let _ = shown;
+        }
     }
     #[cfg(not(windows))]
     let _ = (planes, plane_parameters);
@@ -896,7 +1010,7 @@ const PAGE: u64 = 64 << 10;
 
 /// `CopyPageMappingsBatchX(count, batches, pool, pool pages, flags)`: maps
 /// pages of a pool (memory the title mapped physical pages into) at the
-/// batches' addresses. Grand Theft Auto VI streams textures into pool pages
+/// batches' addresses. The title streams textures into pool pages
 /// and maps them into its tiled heap this way (title+0xf2c470, ranges of
 /// one constant page or of unmapped pages). Done at once: every earlier
 /// submission has run.
@@ -978,7 +1092,7 @@ const METHODS: [(usize, *const ()); 15] = [
 /// Newer titles' queues have two more methods before Signal, which moved
 /// from 0x70 to 0x80: every slot from 0x70 on is two later (taken here as
 /// starting exactly at 0x70, the methods before it kept in place).
-/// Inferred from Grand Theft Auto VI's calls: Signal 0x80 `(fence,
+/// Inferred from the title's calls: Signal 0x80 `(fence,
 /// value)`, timestamp frequency 0x90 (title+0x24841a6), suspend and resume
 /// 0xb8/0xc0, PresentX 0x100, the frame-token submission 0x118 `(count,
 /// lists, token, flags)` (title+0x24821dd).
@@ -1046,7 +1160,7 @@ mod tests {
         assert_eq!(slot::<extern "system" fn(This) -> u32>(q, 0x10)(q), 0);
     }
 
-    /// Grand Theft Auto VI's compute queue: `{COMPUTE, 0, pipe 1, queue 0}`.
+    /// The title's compute queue: `{COMPUTE, 0, pipe 1, queue 0}`.
     #[test]
     fn console_queues_are_created_as_on_pc() {
         let null = std::ptr::null();

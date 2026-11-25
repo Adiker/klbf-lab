@@ -39,6 +39,11 @@ const RTV_RING: u32 = 1024;
 pub(crate) struct Host {
     pub(crate) device: ID3D12Device,
     queue: ID3D12CommandQueue,
+    /// Dedicated DMA copy queue (`D3D12_COMMAND_LIST_TYPE_COPY`) for
+    /// [`Host::relay_card_back`], so readbacks of completed flights do not
+    /// queue behind in-flight graphics work on `queue` (`VICTORY_RELAY_COPY_QUEUE=0`
+    /// disables it).
+    copy_queue: Option<ID3D12CommandQueue>,
     fence: ID3D12Fence,
     /// The last value signalled on `fence`, behind the submission lock.
     submitted: Mutex<u64>,
@@ -591,6 +596,16 @@ fn create() -> windows::core::Result<Host> {
             Type: D3D12_COMMAND_LIST_TYPE_DIRECT,
             ..Default::default()
         })?;
+        let copy_queue = if std::env::var_os("VICTORY_RELAY_COPY_QUEUE").is_some_and(|v| v == "0") {
+            None
+        } else {
+            device
+                .CreateCommandQueue::<ID3D12CommandQueue>(&D3D12_COMMAND_QUEUE_DESC {
+                    Type: D3D12_COMMAND_LIST_TYPE_COPY,
+                    ..Default::default()
+                })
+                .ok()
+        };
         let fence: ID3D12Fence = device.CreateFence(0, D3D12_FENCE_FLAG_NONE)?;
         let event = CreateEventW(None, false, false, None)?;
         let rtvs: ID3D12DescriptorHeap =
@@ -614,6 +629,7 @@ fn create() -> windows::core::Result<Host> {
         Ok(Host {
             device,
             queue,
+            copy_queue,
             fence,
             submitted: Mutex::new(0),
             event,
@@ -654,6 +670,50 @@ fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
 
 #[cfg(test)]
 mod tests {
+    use super::{BUFFER_READ, BUFFER_WRITE, BufferStates};
+
+    #[test]
+    fn buffer_states_transition_between_writes_and_reads() {
+        let mut s = BufferStates::default();
+        // First uses: the prelude's.
+        assert_eq!(s.update(1, 'a', BUFFER_WRITE), None);
+        assert_eq!(s.update(2, 'b', BUFFER_READ), None);
+        assert_eq!(s.update(1, 'a', BUFFER_WRITE), None);
+        s.next_command();
+        assert_eq!(s.update(1, 'a', BUFFER_READ), Some(BUFFER_WRITE));
+        assert_eq!(s.update(1, 'a', BUFFER_READ), None);
+        s.next_command();
+        assert_eq!(s.update(1, 'a', BUFFER_WRITE), Some(BUFFER_READ));
+        let sorted = |mut v: Vec<(char, u32)>| {
+            v.sort_unstable();
+            v
+        };
+        let firsts = sorted(s.firsts().map(|(r, f)| (*r, f)).collect());
+        assert_eq!(firsts, [('a', BUFFER_WRITE), ('b', BUFFER_READ)]);
+        let lasts = sorted(s.lasts().map(|(r, l)| (*r, l)).collect());
+        assert_eq!(lasts, [('a', BUFFER_WRITE), ('b', BUFFER_READ)]);
+        s.clear();
+        assert_eq!(s.firsts().count(), 0);
+    }
+
+    /// One command that writes a copy and reads it: the write state wins
+    /// whichever is bound first; the next command reads again.
+    #[test]
+    fn buffer_states_keep_a_command_writing() {
+        let mut s = BufferStates::default();
+        s.next_command();
+        assert_eq!(s.update(1, 'a', BUFFER_WRITE), None);
+        assert_eq!(s.update(1, 'a', BUFFER_READ), None);
+        s.next_command();
+        assert_eq!(s.update(1, 'a', BUFFER_READ), Some(BUFFER_WRITE));
+        assert_eq!(s.update(1, 'a', BUFFER_WRITE), Some(BUFFER_READ));
+        assert_eq!(s.update(1, 'a', BUFFER_READ), None);
+        s.next_command();
+        assert_eq!(s.update(1, 'a', BUFFER_READ), Some(BUFFER_WRITE));
+        let lasts: Vec<_> = s.lasts().map(|(r, l)| (*r, l)).collect();
+        assert_eq!(lasts, [('a', BUFFER_READ)]);
+    }
+
     #[test]
     fn sparse_copies_preserve_islands_and_observe_remaps() {
         use windows_sys::Win32::System::Memory::*;
@@ -733,6 +793,8 @@ pub(crate) struct HostList {
     /// list names alive until it is reset, even if the title releases the
     /// resource first.
     states: Mutex<States>,
+    /// The states of the host copies of title memory the list uses.
+    buffers: Mutex<BufferStates<ID3D12Resource>>,
     /// What the list does with depth textures that have a colour twin, by
     /// twin ([`TwinUse`]).
     twins: Mutex<std::collections::HashMap<usize, TwinUse>>,
@@ -786,6 +848,90 @@ type States = std::collections::HashMap<
     (u32, u32, std::sync::Arc<crate::resource::HostTexture>),
 >;
 
+/// Every read of a host copy of title memory (vertex, index, constant and
+/// shader-resource data, indirect counts, the argument clamp's sources).
+pub(crate) const BUFFER_READ: u32 = D3D12_RESOURCE_STATE_GENERIC_READ.0 as u32;
+/// Shader writes to a host copy of title memory.
+pub(crate) const BUFFER_WRITE: u32 = D3D12_RESOURCE_STATE_UNORDERED_ACCESS.0 as u32;
+
+/// The states of the host copies of title memory (buffers) one list uses,
+/// by copy: the state it starts in and the one it is in now (upstream
+/// VIctory #334). A buffer is in the common state between lists: the
+/// list's prelude moves it to its first state and the list moves it back
+/// before it closes. A buffer a shader writes and a later command reads
+/// (the meshlet cull's arguments and counts, vertices) is transitioned in
+/// between; the implicit promotion from common it relied on allows either
+/// use in a list, not both.
+///
+/// Within one command (a draw, a dispatch, the argument clamp) the write
+/// state wins: a copy one command both writes and reads (one host copy
+/// backs most of the title's buffers) stays writable, whatever order the
+/// command's views are bound in.
+///
+/// shortcut: buffers read only through directly indexed heaps are not
+/// tracked, and a command that both writes a buffer and reads it as
+/// vertices, indices or counts reads them in the write state.
+pub(crate) struct BufferStates<R> {
+    /// First state, current state, the command that last wrote it.
+    by_copy: std::collections::HashMap<usize, (u32, u32, Option<u64>, R)>,
+    command: u64,
+}
+
+impl<R> Default for BufferStates<R> {
+    fn default() -> Self {
+        BufferStates {
+            by_copy: std::collections::HashMap::new(),
+            command: 0,
+        }
+    }
+}
+
+impl<R> BufferStates<R> {
+    /// Uses from here on belong to the next command.
+    pub(crate) fn next_command(&mut self) {
+        self.command += 1;
+    }
+
+    /// The list uses `copy` (`resource`) in `wanted`: the state it leaves,
+    /// if a transition must be recorded now. A first use records nothing:
+    /// the prelude moves the buffer there.
+    pub(crate) fn update(&mut self, copy: usize, resource: R, wanted: u32) -> Option<u32> {
+        let command = self.command;
+        let wrote = (wanted == BUFFER_WRITE).then_some(command);
+        match self.by_copy.entry(copy) {
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert((wanted, wanted, wrote, resource));
+                None
+            }
+            std::collections::hash_map::Entry::Occupied(mut o) => {
+                let e = o.get_mut();
+                if wrote.is_some() {
+                    e.2 = wrote;
+                } else if e.2 == Some(command) {
+                    return None;
+                }
+                let before = std::mem::replace(&mut e.1, wanted);
+                (before != wanted).then_some(before)
+            }
+        }
+    }
+
+    /// The prelude's transitions: each buffer from common to its first state.
+    pub(crate) fn firsts(&self) -> impl Iterator<Item = (&R, u32)> {
+        self.by_copy.values().map(|(first, _, _, r)| (r, *first))
+    }
+
+    /// The list's closing transitions: each buffer from its last state back
+    /// to common.
+    pub(crate) fn lasts(&self) -> impl Iterator<Item = (&R, u32)> {
+        self.by_copy.values().map(|(_, last, _, r)| (r, *last))
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.by_copy.clear();
+    }
+}
+
 /// What a list does with a depth texture that has a colour twin
 /// ([`crate::resource::Twin`]). Lists are recorded on many threads and run
 /// in submission order, so a list cannot know which side an earlier list
@@ -815,7 +961,7 @@ struct TwinUse {
 ///
 /// A 16-bit twin holds whole steps of 1/65535, and the depth written is
 /// the step times the float nearest 1/65535 (0x37800080). That is how
-/// Grand Theft Auto VI's tiled lighting computes the depth of the
+/// The title's tiled lighting computes the depth of the
 /// rectangles it then draws with the test "equal", one class of materials
 /// a draw (all six of its vertex shaders multiply the class number by that
 /// constant), so the pass and the draw give the host the same float, and
@@ -872,7 +1018,12 @@ unsafe impl Sync for PlanePass {}
 
 fn plane_pass() -> Option<&'static PlanePass> {
     static PASS: OnceLock<Option<PlanePass>> = OnceLock::new();
-    PASS.get_or_init(|| {
+    PASS.get_or_init(PlanePass::new).as_ref()
+}
+
+impl PlanePass {
+    /// A pass's heap of views, with no pipeline made yet.
+    fn new() -> Option<Self> {
         let host = host()?;
         let kind = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
         // SAFETY: plain heap creation and queries.
@@ -895,8 +1046,7 @@ fn plane_pass() -> Option<&'static PlanePass> {
                 made: Mutex::default(),
             })
         }
-    })
-    .as_ref()
+    }
 }
 
 /// Compiles function `entry` of `source` for `target` with the system's
@@ -951,18 +1101,29 @@ impl PlanePass {
     /// The root signature and pipeline for a twin of 16-bit steps (`steps`)
     /// or of floats and the depth format `format`.
     fn pipeline(&self, steps: bool, format: DXGI_FORMAT) -> Option<PlanePipeline> {
+        self.made_with(steps, format, Self::make)
+    }
+
+    /// The pipeline `make` makes for (`steps`, `format`), made once (the
+    /// present pass ([`record_layers`]) reads `steps` as "blended").
+    fn made_with(
+        &self,
+        steps: bool,
+        format: DXGI_FORMAT,
+        make: fn(bool, DXGI_FORMAT) -> windows::core::Result<PlanePipeline>,
+    ) -> Option<PlanePipeline> {
         let mut made = self.made.lock().unwrap_or_else(|e| e.into_inner());
         if let Some((_, _, pipeline)) = made.iter().find(|m| (m.0, m.1) == (steps, format.0)) {
             return pipeline.clone();
         }
-        let pipeline = match Self::make(steps, format) {
+        let pipeline = match make(steps, format) {
             Ok(pipeline) => Some(pipeline),
             Err(e) => {
                 tracing::warn!(
                     error = %e,
                     steps,
                     format = format.0,
-                    "no pipeline to draw a depth plane from its twin: such planes stay as they are"
+                    "no pipeline for a pass of ours (a depth plane from its twin, or present planes): what it draws stays as it is"
                 );
                 None
             }
@@ -1136,7 +1297,7 @@ fn record_twin_copy(
     // shortcut: the depth plane's twin is not given the plane (that is a
     // pass the other way: the plane read by a shader, the twin as its
     // target). The twin then lacks what draws and clears wrote to the
-    // plane since shaders last wrote the twin. In Grand Theft Auto VI
+    // plane since shaders last wrote the twin. In the title
     // nothing writes that plane but the twin's pass (its 192 draws against
     // it only test, run 29), so the twin lacks nothing. Counted.
     if colour && twin.plane.is_some() {
@@ -1449,11 +1610,14 @@ unsafe impl Send for CardWork {}
 static CARD_WORK: Mutex<Option<CardWork>> = Mutex::new(None);
 
 /// The compare of a declared range of a copy in the card's memory with
-/// its bytes from before, one thread per 64 KiB piece (cut at multiples of
-/// 64 KiB of title memory, as `Shadow::card_piece` cuts them): `differs`
-/// gets a dword per piece, 1 where a byte differs. The offsets are widened
-/// to 16 bytes; buffers are multiples of 64 KiB, and a piece flagged for a
-/// byte just outside the range costs a fetch that finds nothing.
+/// its bytes from before, one 64-thread group per 64 KiB piece (cut at
+/// multiples of 64 KiB of title memory, as `Shadow::card_piece` cuts them):
+/// each lane strides through the piece 1024 bytes at a time for coalesced
+/// 16-byte loads, then the group reduces the 64 partial hashes in shared
+/// memory. `differs` gets a dword per piece, 1 where a byte differs. The
+/// offsets are widened to 16 bytes; buffers are multiples of 64 KiB, and a
+/// piece flagged for a byte just outside the range costs a fetch that finds
+/// nothing.
 pub(crate) const CARD_COMPARE: &str = r#"
 #define RS "RootConstants(num32BitConstants=6, b0), SRV(t0), UAV(u0), UAV(u1)"
 cbuffer Span : register(b0) {
@@ -1469,32 +1633,87 @@ ByteAddressBuffer now : register(t0);
 // last sent up (or hashed whole, the first time).
 RWByteAddressBuffer hashes : register(u0);
 RWByteAddressBuffer differs : register(u1);
+groupshared uint4 shared_h[64];
 [RootSignature(RS)]
 [numthreads(64, 1, 1)]
-void main(uint3 id : SV_DispatchThreadID) {
-    if (id.x >= pieces) return;
-    uint piece = first + id.x;
+void main(uint3 gid : SV_GroupID, uint3 gtid : SV_GroupThreadID) {
+    uint idx = gid.x;
+    if (idx >= pieces) return;
+    uint lane = gtid.x;
+    uint piece = first + idx;
     uint lo = piece * 65536u;
     lo = lo > skew ? lo - skew : 0u;
     uint hi = min((piece + 1u) * 65536u - skew, size);
     lo = lo & ~15u;
     hi = (hi + 15u) & ~15u;
-    uint4 h = uint4(0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu);
+    uint4 h = uint4(0x9E3779B9u, 0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu) ^ (lane * 0x9E3779B9u);
     [loop]
-    for (uint at = lo; at < hi; at += 16u) {
+    for (uint at = lo + lane * 16u; at < hi; at += 1024u) {
         h = (h ^ now.Load4(at)) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
         h = h.yzwx ^ (h >> 15);
     }
-    if (compare != 0u) {
-        differs.Store(out_at + id.x * 4u, any(h != hashes.Load4(piece * 16u)) ? 1u : 0u);
-        // With the copy-back on its own thread: the next compare of the
-        // piece finds what is written from here on.
-        if (compare == 2u) hashes.Store4(piece * 16u, h);
-    } else {
-        hashes.Store4(piece * 16u, h);
+    shared_h[lane] = h;
+    GroupMemoryBarrierWithGroupSync();
+    [unroll]
+    for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+        if (lane < stride) {
+            uint4 a = shared_h[lane];
+            uint4 b = shared_h[lane + stride];
+            // Mix `b` asymmetrically (fmix32 + component swizzle) before
+            // combining with `a` so identical high-bit flips on paired lanes
+            // (e.g. lane 0 and lane 32's last loads) cannot cancel in `a ^ b`.
+            b ^= b >> 16;
+            b *= uint4(0x85EBCA6Bu, 0xC2B2AE35u, 0x27D4EB2Fu, 0x165667B1u);
+            b ^= b >> 13;
+            b *= uint4(0xC2B2AE35u, 0x27D4EB2Fu, 0x165667B1u, 0x85EBCA6Bu);
+            b ^= b >> 16;
+            a = (a ^ b.zwxy) * uint4(0x01000193u, 0x9E3779B1u, 0x85EBCA77u, 0xC2B2AE3Du);
+            shared_h[lane] = a.yzwx ^ (a >> 15);
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (lane == 0u) {
+        uint4 final_h = shared_h[0];
+        if (compare != 0u) {
+            differs.Store(out_at + idx * 4u, any(final_h != hashes.Load4(piece * 16u)) ? 1u : 0u);
+            // With the copy-back on its own thread: the next compare of the
+            // piece finds what is written from here on.
+            if (compare == 2u) hashes.Store4(piece * 16u, final_h);
+        } else {
+            hashes.Store4(piece * 16u, final_h);
+        }
     }
 }
 "#;
+
+/// Dispatch [`CARD_COMPARE`] for `pieces` pieces (one thread group per piece),
+/// chunking at D3D12's 65,535-group per-dimension limit if ever exceeded.
+///
+/// # Safety
+/// The caller must have bound [`CARD_COMPARE`]'s root signature, pipeline,
+/// SRV, and UAVs on `list`, and `list` must be open for recording.
+unsafe fn dispatch_card_compare(
+    list: &ID3D12GraphicsCommandList,
+    first: u32,
+    skew: u32,
+    size: u32,
+    pieces: u32,
+    out_at_bytes: u32,
+    compare: u32,
+) {
+    const MAX_GROUPS: u32 = 65_535;
+    let mut done = 0u32;
+    while done < pieces {
+        let chunk = (pieces - done).min(MAX_GROUPS);
+        let constants = [first + done, skew, size, chunk, out_at_bytes + done * 4, compare];
+        // SAFETY: caller guarantees `list` is open with CARD_COMPARE bound.
+        unsafe {
+            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
+            list.Dispatch(chunk, 1, 1);
+        }
+        done += chunk;
+    }
+}
 
 /// Whether the pieces hashed again after ranges were sent up to a copy in
 /// the card's memory are hashed in runs of pieces that touch, each piece
@@ -1554,6 +1773,10 @@ struct CardPlan {
     /// The lists of ours the plan recorded (whether the compare, the
     /// list), given back by `Host::card_done`.
     lists: Vec<(bool, Prelude)>,
+    /// Value of [`QUEUE_ORDER`] immediately after this submission's `sync`
+    /// list was queued on `Host::queue`. Every send `<= order_after` has
+    /// finished on the card once this flight completes.
+    order_after: u64,
 }
 
 /// One piece of submission-time work, in recorded order.
@@ -2330,6 +2553,9 @@ fn relay_wait(why: usize, done: impl Fn(&Line) -> bool) {
 /// behind the submission lock), and the memory the pieces come down to.
 struct RelayFetch {
     list: Prelude,
+    /// True when `list` was created as `D3D12_COMMAND_LIST_TYPE_COPY` for
+    /// `Host::copy_queue`.
+    copy_queue: bool,
     fence: ID3D12Fence,
     event: HANDLE,
     /// The last value signalled on `fence`.
@@ -2836,6 +3062,7 @@ impl Host {
                 deferred: Mutex::default(),
                 scratch: Mutex::default(),
                 states: Mutex::default(),
+                buffers: Mutex::default(),
                 twins: Mutex::default(),
                 prelude,
                 pipelines: Mutex::default(),
@@ -3082,9 +3309,7 @@ impl Host {
                         CARD_PASSES[0].fetch_add(runs.len() as u64, Ordering::Relaxed);
                         CARD_PASSES[1].fetch_add(runs.iter().map(|r| u64::from(r.pieces)).sum::<u64>(), Ordering::Relaxed);
                         for run in runs {
-                            let constants = [run.first, run.skew, size as u32, run.pieces, 0, 0];
-                            list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
-                            list.Dispatch(run.pieces.div_ceil(64), 1, 1);
+                            dispatch_card_compare(list, run.first, run.skew, size as u32, run.pieces, 0, 0);
                         }
                     }
                     list.Close()?;
@@ -3097,12 +3322,14 @@ impl Host {
             }
             used.push((false, sync));
         }
+        let order_after = order.as_deref().copied().unwrap_or(0);
         drop(order);
         let mut plan = CardPlan {
             ranges: Vec::new(),
             check: None,
             _synced: dirty.into_iter().map(|(shadow, _)| shadow).collect(),
             lists: used,
+            order_after,
         };
         // Each byte once, as the copy-back joins the declared ranges. The
         // results go behind those of plans still in the air.
@@ -3165,11 +3392,17 @@ impl Host {
                         let Some((_, Some(before), size)) = r.shadow.card_sides() else {
                             continue;
                         };
-                        let constants = [r.span.first, r.span.skew, size as u32, r.span.pieces, r.at * 4, if flown { 2 } else { 1 }];
-                        list.SetComputeRoot32BitConstants(0, 6, constants.as_ptr().cast(), 0);
                         list.SetComputeRootShaderResourceView(1, r.shadow.buffer.GetGPUVirtualAddress());
                         list.SetComputeRootUnorderedAccessView(2, before.GetGPUVirtualAddress());
-                        list.Dispatch(r.span.pieces.div_ceil(64), 1, 1);
+                        dispatch_card_compare(
+                            list,
+                            r.span.first,
+                            r.span.skew,
+                            size as u32,
+                            r.span.pieces,
+                            r.at * 4,
+                            if flown { 2 } else { 1 },
+                        );
                         CARD_PASSES[2].fetch_add(1, Ordering::Relaxed);
                     }
                     list.Close()?;
@@ -3218,14 +3451,37 @@ impl Host {
     }
 
     /// The relay's own list, fence, event for [`Host::relay_card_back`].
+    /// Prefers a `D3D12_COMMAND_LIST_TYPE_COPY` list when `self.copy_queue`
+    /// is available so readbacks run on the hardware DMA engine without
+    /// waiting behind in-flight graphics work on `self.queue`.
     fn make_relay_fetch(&self) -> Option<RelayFetch> {
-        let list = self.make_prelude()?;
+        let (list, copy_queue) = if self.copy_queue.is_some() {
+            // SAFETY: plain object creation.
+            let copy_list: windows::core::Result<Prelude> = unsafe {
+                (|| {
+                    let allocator: ID3D12CommandAllocator =
+                        self.device.CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY)?;
+                    let list: ID3D12GraphicsCommandList =
+                        self.device
+                            .CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COPY, &allocator, None)?;
+                    list.Close()?;
+                    Ok((allocator, list))
+                })()
+            };
+            match copy_list {
+                Ok(prelude) => (prelude, true),
+                Err(_) => (self.make_prelude()?, false),
+            }
+        } else {
+            (self.make_prelude()?, false)
+        };
         // SAFETY: plain objects of our own.
         unsafe {
             let fence: ID3D12Fence = self.device.CreateFence(0, D3D12_FENCE_FLAG_NONE).ok()?;
             let event = CreateEventW(None, false, false, None).ok()?;
             Some(RelayFetch {
                 list,
+                copy_queue,
                 fence,
                 event,
                 sent: 0,
@@ -3285,9 +3541,15 @@ impl Host {
                 }
             }
         }
+        let completed_order = plans.iter().map(|p| p.order_after).max().unwrap_or(0);
         if pieces.is_empty() {
-            // Nothing to fetch: every send so far is older than the next fetch.
-            crate::shadow::relay_fetched(*QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner()));
+            // Nothing to fetch: every send up to these flights is done.
+            let after = if self.copy_queue.is_some() {
+                completed_order
+            } else {
+                *QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner())
+            };
+            crate::shadow::relay_fetched(after);
             return;
         }
         if fetch.is_none() {
@@ -3304,7 +3566,8 @@ impl Host {
             fail(format_args!("no memory to fetch what shaders wrote to the card's memory ({total} bytes, VICTORY_RELAY=1)"));
         };
         f.sent += 1;
-        let ((allocator, list), fence, event, sent) = (f.list.clone(), f.fence.clone(), f.event, f.sent);
+        let ((allocator, list), use_copy_queue, fence, event, sent) =
+            (f.list.clone(), f.copy_queue, f.fence.clone(), f.event, f.sent);
         let waiting = std::time::Instant::now();
         // SAFETY: the list's last run was waited for by this thread; live
         // buffers (the copies are held by the plans); the fence and the
@@ -3318,17 +3581,29 @@ impl Host {
                 }
                 list.Close()?;
                 let lists = [Some(list.cast::<ID3D12CommandList>()?)];
-                // In the order of the queue: the sends of title bytes so
-                // far are ahead of this fetch, every later one behind it.
-                let order = QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner());
-                self.queue.ExecuteCommandLists(&lists);
-                let after = *order;
-                drop(order);
-                self.card_sent();
-                self.queue.Signal(&fence, sent)?;
-                fence.SetEventOnCompletion(sent, event)?;
-                WaitForSingleObject(event, INFINITE);
-                Ok(after)
+                if use_copy_queue && let Some(cq) = &self.copy_queue {
+                    // The flights being landed have already completed on
+                    // `self.queue`, so all sends `<= completed_order` are
+                    // visible in VRAM; any later send has `s.2 > completed_order`
+                    // and is skipped by `card_merge_relay`.
+                    cq.ExecuteCommandLists(&lists);
+                    cq.Signal(&fence, sent)?;
+                    fence.SetEventOnCompletion(sent, event)?;
+                    WaitForSingleObject(event, INFINITE);
+                    Ok(completed_order)
+                } else {
+                    // In the order of the queue: the sends of title bytes so
+                    // far are ahead of this fetch, every later one behind it.
+                    let order = QUEUE_ORDER.lock().unwrap_or_else(|e| e.into_inner());
+                    self.queue.ExecuteCommandLists(&lists);
+                    let after = *order;
+                    drop(order);
+                    self.card_sent();
+                    self.queue.Signal(&fence, sent)?;
+                    fence.SetEventOnCompletion(sent, event)?;
+                    WaitForSingleObject(event, INFINITE);
+                    Ok(after)
+                }
             })()
         };
         let after = match ran {
@@ -4422,6 +4697,20 @@ impl HostList {
                 self.list.ResolveQueryData(heap, D3D12_QUERY_TYPE_TIMESTAMP, 0, count + 1, back, 0);
             }
         }
+        // The buffers it used back to common, where the next list's prelude
+        // expects them.
+        let back: Vec<D3D12_RESOURCE_BARRIER> = self
+            .buffers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .lasts()
+            .filter(|&(_, last)| last != D3D12_RESOURCE_STATE_COMMON.0 as u32)
+            .map(|(b, last)| transition(b, D3D12_RESOURCE_STATES(last as i32), D3D12_RESOURCE_STATE_COMMON))
+            .collect();
+        if !back.is_empty() {
+            // SAFETY: an open list and buffers the list holds.
+            unsafe { self.list.ResourceBarrier(&back) };
+        }
         // SAFETY: our list.
         if let Err(e) = unsafe { self.list.Close() } {
             fail(format_args!(
@@ -4438,6 +4727,7 @@ impl HostList {
         self._alive.used();
         *self.deferred() = Deferred::default();
         self.states.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.buffers.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.twins.lock().unwrap_or_else(|e| e.into_inner()).clear();
         self.pipelines.lock().unwrap_or_else(|e| e.into_inner()).clear();
         #[cfg(feature = "diagnostics")]
@@ -4643,7 +4933,7 @@ impl HostList {
     /// are given what was written, and left readable by shaders. Shaders
     /// that pick a view from the heap by a computed index are not seen by
     /// `twin_use` and read the depth texture in lists that never name it
-    /// (in a captured frame of Grand Theft Auto VI no table names a shadow
+    /// (in a captured frame of the title no table names a shadow
     /// map for reading but the pass that fills the next one).
     fn twins_to_depth(&self) {
         const SHADER_RESOURCE: u32 = 0x40 | 0x80;
@@ -4679,6 +4969,27 @@ impl HostList {
         for u in twins.values_mut().filter(|u| u.writing) {
             u.writing = false;
             u.behind[0] = Some(true);
+        }
+    }
+
+    /// The uses of host copies that follow belong to a new command (draw,
+    /// dispatch, argument clamp): see [`BufferStates`].
+    pub(crate) fn begin_command(&self) {
+        self.buffers.lock().unwrap_or_else(|e| e.into_inner()).next_command();
+    }
+
+    /// Moves a host copy of title memory to `wanted` ([`BUFFER_READ`] or
+    /// [`BUFFER_WRITE`]) in this list: see [`BufferStates`].
+    pub(crate) fn buffer_state(&self, buffer: &ID3D12Resource, wanted: u32) {
+        let mut buffers = self.buffers.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(before) = buffers.update(buffer.as_raw() as usize, buffer.clone(), wanted) {
+            let barrier = transition(
+                buffer,
+                D3D12_RESOURCE_STATES(before as i32),
+                D3D12_RESOURCE_STATES(wanted as i32),
+            );
+            // SAFETY: an open list and a buffer the list holds.
+            unsafe { self.list.ResourceBarrier(&[barrier]) };
         }
     }
 
@@ -4748,6 +5059,14 @@ impl HostList {
             (real != *first)
                 .then(|| transition(&copy.texture, host_state(real), host_state(*first)))
         }));
+        drop(states);
+        barriers.extend(
+            self.buffers
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .firsts()
+                .map(|(b, first)| transition(b, D3D12_RESOURCE_STATE_COMMON, host_state(first))),
+        );
         if barriers.is_empty() && syncs.is_empty() {
             return None;
         }
@@ -5591,6 +5910,282 @@ impl Host {
     }
 }
 
+/// One resource of a present plane, as [`Host::present`] shows it.
+pub(crate) struct Layer<'a> {
+    pub(crate) texture: &'a ID3D12Resource,
+    /// Its host state, which it stays in.
+    pub(crate) state: u32,
+    /// The texels shown (left, top, right, bottom); `None`: all of them.
+    pub(crate) source: Option<[i32; 4]>,
+    /// Where they go, in fractions of the window; `None`: all of it.
+    pub(crate) place: Option<[f32; 4]>,
+}
+
+impl Layer<'_> {
+    /// The source rectangle in texels, clamped to a texture of `width` by
+    /// `height`: the whole texture if none or an empty one is given.
+    fn texels(&self, width: u32, height: u32) -> [i32; 4] {
+        texels(self.source, width, height)
+    }
+
+    /// The destination as fractions of the window.
+    fn fractions(&self) -> [f32; 4] {
+        fractions(self.place)
+    }
+}
+
+/// [`Layer::texels`].
+fn texels(source: Option<[i32; 4]>, width: u32, height: u32) -> [i32; 4] {
+    let (w, h) = (width as i32, height as i32);
+    match source {
+        Some([l, t, r, b]) => {
+            let [l, r] = [l.clamp(0, w), r.clamp(0, w)];
+            let [t, b] = [t.clamp(0, h), b.clamp(0, h)];
+            if r > l && b > t { [l, t, r, b] } else { [0, 0, w, h] }
+        }
+        None => [0, 0, w, h],
+    }
+}
+
+/// [`Layer::fractions`]: the whole window if no placement, or one that is
+/// not a rectangle of fractions, is given.
+// ponytail: the console's placement record is read as four fractions (the
+// log shows its raw words); read it otherwise once a title shows another
+// layout.
+fn fractions(place: Option<[f32; 4]>) -> [f32; 4] {
+    match place {
+        Some([l, t, r, b])
+            if [l, t, r, b].iter().all(|v| (-0.01..=1.01).contains(v)) && r > l && b > t =>
+        {
+            [l, t, r, b]
+        }
+        _ => [0.0, 0.0, 1.0, 1.0],
+    }
+}
+
+/// The present pass: each layer's source rectangle drawn over its
+/// destination (one triangle over a viewport the size of the destination,
+/// sampled bilinearly), the first layer as it is, the others blended over
+/// it with premultiplied alpha (`VICTORY_PRESENT_STRAIGHT=1`: straight).
+const LAYER: &str = r#"
+#define RS "RootConstants(num32BitConstants = 4, b0), DescriptorTable(SRV(t0), visibility = SHADER_VISIBILITY_PIXEL), StaticSampler(s0, filter = FILTER_MIN_MAG_MIP_LINEAR, addressU = TEXTURE_ADDRESS_CLAMP, addressV = TEXTURE_ADDRESS_CLAMP, addressW = TEXTURE_ADDRESS_CLAMP)"
+cbuffer source : register(b0) { float4 source; };
+Texture2DArray<float4> plane : register(t0);
+SamplerState bilinear : register(s0);
+struct Corner { float4 p : SV_Position; float2 uv : TEXCOORD0; };
+[RootSignature(RS)]
+Corner corner(uint i : SV_VertexID) {
+    float2 t = float2(i & 1, i >> 1) * 2.0;
+    Corner c;
+    c.p = float4(t.x * 2.0 - 1.0, 1.0 - t.y * 2.0, 0.0, 1.0);
+    c.uv = lerp(source.xy, source.zw, t);
+    return c;
+}
+[RootSignature(RS)]
+float4 layer(Corner c) : SV_Target {
+    return plane.Sample(bilinear, float3(c.uv, 0.0));
+}
+"#;
+
+fn layer_pass() -> Option<&'static PlanePass> {
+    static PASS: OnceLock<Option<PlanePass>> = OnceLock::new();
+    PASS.get_or_init(PlanePass::new).as_ref()
+}
+
+/// Straight alpha for the planes over the first (`VICTORY_PRESENT_STRAIGHT=1`).
+fn straight_alpha() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_PRESENT_STRAIGHT").is_some_and(|v| v == "1"))
+}
+
+/// The present pass's pipeline for a target of `format`, blending
+/// (`blended`) or not.
+fn make_layer(blended: bool, format: DXGI_FORMAT) -> windows::core::Result<PlanePipeline> {
+    use windows::core::s;
+    let device = &host().ok_or_else(windows::core::Error::empty)?.device;
+    let vs = compile(LAYER, s!("corner"), s!("vs_5_1"))?;
+    let ps = compile(LAYER, s!("layer"), s!("ps_5_1"))?;
+    let code = |bytes: &[u8]| D3D12_SHADER_BYTECODE {
+        pShaderBytecode: bytes.as_ptr().cast(),
+        BytecodeLength: bytes.len(),
+    };
+    let mut blend = D3D12_BLEND_DESC::default();
+    blend.RenderTarget[0] = D3D12_RENDER_TARGET_BLEND_DESC {
+        BlendEnable: blended.into(),
+        LogicOpEnable: false.into(),
+        SrcBlend: if straight_alpha() { D3D12_BLEND_SRC_ALPHA } else { D3D12_BLEND_ONE },
+        DestBlend: D3D12_BLEND_INV_SRC_ALPHA,
+        BlendOp: D3D12_BLEND_OP_ADD,
+        SrcBlendAlpha: D3D12_BLEND_ONE,
+        DestBlendAlpha: D3D12_BLEND_INV_SRC_ALPHA,
+        BlendOpAlpha: D3D12_BLEND_OP_ADD,
+        LogicOp: D3D12_LOGIC_OP_NOOP,
+        RenderTargetWriteMask: D3D12_COLOR_WRITE_ENABLE_ALL.0 as u8,
+    };
+    let mut formats = [DXGI_FORMAT_UNKNOWN; 8];
+    formats[0] = format;
+    // SAFETY: the root signature is inside the pixel shader; the
+    // description points at live data and never releases its pointer.
+    unsafe {
+        let root: ID3D12RootSignature = device.CreateRootSignature(0, &ps[..])?;
+        let desc = D3D12_GRAPHICS_PIPELINE_STATE_DESC {
+            pRootSignature: std::mem::transmute_copy(&root),
+            VS: code(&vs[..]),
+            PS: code(&ps[..]),
+            BlendState: blend,
+            SampleMask: u32::MAX,
+            RasterizerState: D3D12_RASTERIZER_DESC {
+                FillMode: D3D12_FILL_MODE_SOLID,
+                CullMode: D3D12_CULL_MODE_NONE,
+                DepthClipEnable: true.into(),
+                ..Default::default()
+            },
+            PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
+            NumRenderTargets: 1,
+            RTVFormats: formats,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            ..Default::default()
+        };
+        let pipeline: ID3D12PipelineState = device.CreateGraphicsPipelineState(&desc)?;
+        Ok((root, pipeline))
+    }
+}
+
+/// The format a presented texture is read as: its family's plain one
+/// (UNORM rather than sRGB, so the bytes reach the window as a copy would
+/// take them). `None`: not one we read.
+fn layer_view_format(format: DXGI_FORMAT) -> Option<DXGI_FORMAT> {
+    Some(DXGI_FORMAT(match format.0 {
+        1..=4 => 2,
+        9..=14 => 10,
+        23..=25 => 24,
+        26 => 26,
+        27..=32 => 28,
+        67 => 67,
+        87 | 90 | 91 => 87,
+        88 | 92 | 93 => 88,
+        _ => return None,
+    }))
+}
+
+/// Records into `list` the layers drawn into `back` (a `width` by `height`
+/// back buffer of `format`, in the present state, left in it), each layer
+/// left in its state.
+fn record_layers(
+    host: &Host,
+    list: &ID3D12GraphicsCommandList,
+    back: &ID3D12Resource,
+    layers: &[Layer],
+    (width, height, format): (u32, u32, DXGI_FORMAT),
+) {
+    const READ: D3D12_RESOURCE_STATES = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    let Some(pass) = layer_pass() else { return };
+    // Each texture once, those not readable by pixel shaders made so.
+    let mut moved: Vec<(&ID3D12Resource, D3D12_RESOURCE_STATES)> = Vec::new();
+    for l in layers {
+        let state = D3D12_RESOURCE_STATES(l.state as i32);
+        if state.0 & READ.0 == 0 && !moved.iter().any(|(t, _)| t.as_raw() == l.texture.as_raw()) {
+            moved.push((l.texture, state));
+        }
+    }
+    let mut to: Vec<_> = moved.iter().map(|(t, s)| transition(t, *s, READ)).collect();
+    to.push(transition(back, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+    let target = host.rtv(Some(back), None);
+    let (fw, fh) = (width as f32, height as f32);
+    // SAFETY: an open list; live resources; our views and pipelines live as
+    // long as the process.
+    unsafe {
+        list.ResourceBarrier(&to);
+        list.ClearRenderTargetView(target, &[0.0, 0.0, 0.0, 1.0], None);
+        list.OMSetRenderTargets(1, Some(&target), false, None);
+        list.SetDescriptorHeaps(&[Some(pass.views.clone())]);
+        list.IASetPrimitiveTopology(windows::Win32::Graphics::Direct3D::D3D_PRIMITIVE_TOPOLOGY(4));
+        for (i, l) in layers.iter().enumerate() {
+            let desc = l.texture.GetDesc();
+            let (Some(view_format), 1) = (layer_view_format(desc.Format), desc.SampleDesc.Count)
+            else {
+                continue;
+            };
+            let Some((root, pipeline)) = pass.made_with(i > 0, format, make_layer) else {
+                continue;
+            };
+            let slot = pass.next.fetch_add(1, Ordering::Relaxed) % PLANE_VIEWS;
+            let view = D3D12_SHADER_RESOURCE_VIEW_DESC {
+                Format: view_format,
+                ViewDimension: D3D12_SRV_DIMENSION_TEXTURE2DARRAY,
+                Shader4ComponentMapping: D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                Anonymous: D3D12_SHADER_RESOURCE_VIEW_DESC_0 {
+                    Texture2DArray: D3D12_TEX2D_ARRAY_SRV {
+                        MostDetailedMip: 0,
+                        MipLevels: 1,
+                        FirstArraySlice: 0,
+                        ArraySize: 1,
+                        ..Default::default()
+                    },
+                },
+            };
+            host.device.CreateShaderResourceView(
+                l.texture,
+                Some(&view),
+                D3D12_CPU_DESCRIPTOR_HANDLE {
+                    ptr: pass.cpu + (slot * pass.step) as usize,
+                },
+            );
+            let [sl, st, sr, sb] = l.texels(desc.Width as u32, desc.Height);
+            let (w, h) = (desc.Width as f32, desc.Height as f32);
+            let uv = [sl as f32 / w, st as f32 / h, sr as f32 / w, sb as f32 / h];
+            let [dl, dt, dr, db] = l.fractions();
+            list.SetGraphicsRootSignature(&root);
+            list.SetPipelineState(&pipeline);
+            list.SetGraphicsRoot32BitConstants(0, 4, uv.as_ptr().cast(), 0);
+            list.SetGraphicsRootDescriptorTable(
+                1,
+                D3D12_GPU_DESCRIPTOR_HANDLE {
+                    ptr: pass.gpu + u64::from(slot * pass.step),
+                },
+            );
+            list.RSSetViewports(&[D3D12_VIEWPORT {
+                TopLeftX: dl * fw,
+                TopLeftY: dt * fh,
+                Width: (dr - dl) * fw,
+                Height: (db - dt) * fh,
+                MinDepth: 0.0,
+                MaxDepth: 1.0,
+            }]);
+            list.RSSetScissorRects(&[RECT {
+                left: (dl * fw).max(0.0) as i32,
+                top: (dt * fh).max(0.0) as i32,
+                right: (dr * fw).min(fw).ceil() as i32,
+                bottom: (db * fh).min(fh).ceil() as i32,
+            }]);
+            list.DrawInstanced(3, 1, 0, 0);
+        }
+        let mut back_to: Vec<_> = moved.iter().map(|(t, s)| transition(t, READ, *s)).collect();
+        back_to.push(transition(back, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+        list.ResourceBarrier(&back_to);
+    }
+}
+
+#[cfg(test)]
+mod layer_tests {
+    use super::{fractions, texels};
+
+    #[test]
+    fn rectangles() {
+        assert_eq!(texels(None, 1920, 1080), [0, 0, 1920, 1080]);
+        assert_eq!(texels(Some([0, 0, 1280, 720]), 1920, 1080), [0, 0, 1280, 720]);
+        assert_eq!(texels(Some([-5, 0, 4000, 720]), 1920, 1080), [0, 0, 1920, 720]);
+        assert_eq!(texels(Some([10, 10, 10, 20]), 1920, 1080), [0, 0, 1920, 1080]);
+        assert_eq!(fractions(None), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(fractions(Some([0.0, 0.5, 1.0, 1.0])), [0.0, 0.5, 1.0, 1.0]);
+        assert_eq!(fractions(Some([0.0, 0.0, 1920.0, 1080.0])), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(fractions(Some([f32::NAN, 0.0, 1.0, 1.0])), [0.0, 0.0, 1.0, 1.0]);
+    }
+}
+
 /// The swap chain formats a presented texture can be copied into: its own
 /// family's.
 fn swap_format(format: DXGI_FORMAT) -> Option<DXGI_FORMAT> {
@@ -5713,6 +6308,16 @@ impl Meter {
                 tracing::info!(
                     "texture refreshes that did not wait for title memory to hold still, per frame (VICTORY_TEXTURE_NO_WAIT=1): \
                      {through:.1} read through the kernel, {left:.1} left for the next refresh (a page was not there)"
+                );
+            }
+            let [changes, waiting, under_way] = [0, 1, 2].map(|i| {
+                crate::watch::REMAPS[i].swap(0, Ordering::Relaxed) as f64 / [1.0, 1e3, 1e3][i] / frames
+            });
+            if changes > 0.0 {
+                tracing::info!(
+                    "changes of title memory's mapping per frame: {changes:.0}, {waiting:.1} ms of them waiting for reads in place, \
+                     {under_way:.1} ms under way (each holds {}; VICTORY_MAPPING_RANGES=0 holds all of title memory)",
+                    if crate::watch::by_range() { "the bytes it changes" } else { "all of title memory" }
                 );
             }
         }
@@ -5873,17 +6478,34 @@ impl Meter {
 }
 
 impl Host {
-    /// Shows `texture`, which is in `state` (a host state) and stays in it,
-    /// as frame `frame` (saved if captures are on). `None` if nothing was
-    /// shown; else, in diagnostics builds, whether the frame was black.
-    pub(crate) fn present(&self, texture: &ID3D12Resource, state: u32, frame: u64) -> Option<bool> {
-        // SAFETY: a live resource.
-        let desc = unsafe { texture.GetDesc() };
-        let Some(format) = swap_format(desc.Format) else {
-            tracing::warn!(format = desc.Format.0, "cannot present this format");
-            return None;
+    /// Shows `layers`, each in its state (a host state) and staying in it,
+    /// as frame `frame` (saved if captures are on): one whole texture of a
+    /// swap chain format is copied, as before; else they are drawn one over
+    /// the other ([`record_layers`]) into a window the size of the largest.
+    /// `None` if nothing was shown; else, in diagnostics builds, whether the
+    /// frame was black (known for a copied texture only).
+    pub(crate) fn present(&self, layers: &[Layer], frame: u64) -> Option<bool> {
+        let first = layers.first()?;
+        let texture = first.texture;
+        let state = first.state;
+        // SAFETY: live resources.
+        let descs: Vec<_> = layers.iter().map(|l| unsafe { l.texture.GetDesc() }).collect();
+        let desc = &descs[0];
+        let whole = [0, 0, desc.Width as i32, desc.Height as i32];
+        let copied = layers.len() == 1
+            && first.texels(desc.Width as u32, desc.Height) == whole
+            && first.fractions() == [0.0, 0.0, 1.0, 1.0]
+            && swap_format(desc.Format).is_some();
+        let (format, width, height) = if copied {
+            (swap_format(desc.Format)?, desc.Width as u32, desc.Height)
+        } else {
+            let Some(format) = descs.iter().find_map(|d| swap_format(d.Format)) else {
+                tracing::warn!(format = desc.Format.0, "cannot present this format");
+                return None;
+            };
+            let width = descs.iter().map(|d| d.Width as u32).max()?;
+            (format, width, descs.iter().map(|d| d.Height).max()?)
         };
-        let (width, height) = (desc.Width as u32, desc.Height);
         let mut presenter = self.presenter.lock().unwrap_or_else(|e| e.into_inner());
         if presenter.is_none() {
             *presenter = match self.presenter(width, height, format) {
@@ -5942,31 +6564,40 @@ impl Host {
             };
             copy.reset();
             let list = &copy.list;
-            list.ResourceBarrier(&[
-                transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE),
-                transition(
-                    &back,
-                    D3D12_RESOURCE_STATE_PRESENT,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                ),
-            ]);
-            list.CopyResource(&back, texture);
             #[cfg(feature = "diagnostics")]
-            let capture = crate::capture::wanted(frame)
-                .then(|| crate::capture::read_back(&self.device, list, texture))
-                .flatten();
-            #[cfg(feature = "diagnostics")]
-            let probe = if slot.is_some() { None } else { crate::capture::probe(&self.device, list, texture) };
+            let mut seen = (None, None);
             #[cfg(not(feature = "diagnostics"))]
             let _ = frame;
-            list.ResourceBarrier(&[
-                transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
-                transition(
-                    &back,
-                    D3D12_RESOURCE_STATE_COPY_DEST,
-                    D3D12_RESOURCE_STATE_PRESENT,
-                ),
-            ]);
+            if copied {
+                list.ResourceBarrier(&[
+                    transition(texture, state, D3D12_RESOURCE_STATE_COPY_SOURCE),
+                    transition(
+                        &back,
+                        D3D12_RESOURCE_STATE_PRESENT,
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                    ),
+                ]);
+                list.CopyResource(&back, texture);
+                #[cfg(feature = "diagnostics")]
+                {
+                    seen.0 = crate::capture::wanted(frame)
+                        .then(|| crate::capture::read_back(&self.device, list, texture))
+                        .flatten();
+                    seen.1 = if slot.is_some() { None } else { crate::capture::probe(&self.device, list, texture) };
+                }
+                list.ResourceBarrier(&[
+                    transition(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, state),
+                    transition(
+                        &back,
+                        D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_PRESENT,
+                    ),
+                ]);
+            } else {
+                record_layers(self, list, &back, layers, (width, height, format));
+            }
+            #[cfg(feature = "diagnostics")]
+            let (capture, probe) = seen;
             copy.close();
             match slot {
                 Some(i) => {
