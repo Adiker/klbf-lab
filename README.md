@@ -1,13 +1,13 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab 33 — AMD test branch</h1>
+<h1 align="center">KLBF Lab 35 — AMD test branch</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/test-Lab%2033-ff7a00" alt="test: Lab 33">
+  <img src="https://img.shields.io/badge/test-Lab%2035-ff7a00" alt="test: Lab 35">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
-  <img src="https://img.shields.io/badge/stable-5.1%20fps-ff7a00" alt="5.1 fps stable">
+  <img src="https://img.shields.io/badge/stable-5.0%20fps-ff7a00" alt="5.0 fps stable">
 </p>
 
-This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the latest [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (25 Nov 2026, including triippywhale's AMD view-heap clamp and the skin/hair texture re-check; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab). Previous test builds are kept as the tags `klbf-lab-31`, `klbf-lab-28` and `klbf-lab-26`.
+This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the latest [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (25 Nov 2026, including triippywhale's AMD view-heap clamp and the skin/hair texture re-check; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab). Previous test builds are kept as the tags `klbf-lab-33`, `klbf-lab-31`, `klbf-lab-28` and `klbf-lab-26`.
 
 No game files are included. You need your own legally obtained copy.
 
@@ -22,6 +22,7 @@ No game files are included. You need your own legally obtained copy.
 | Compute results not seen by other workgroups | `glc` loads not globally coherent on RDNA | upstream VIctory #1271 ported |
 | Lost or misplaced asset loads | DirectStorage page lists read after the title changed them | read at the title's submit (analysis by JappertjeV, [#3](https://github.com/PastiiJay/klbf-lab/issues/3)); `VICTORY_PAGE_LIST=enqueue|submit|late` to compare |
 | Cell walls, window frame and posters missing (sky where the wall should be) | pipelines skipped while the world loads, textures streamed in part taken for others | ported from [myokex/victory-amd](https://github.com/myokex/victory-amd): pipelines kept across runs and waited for while a world loads (`VICTORY_PIPELINE_GATE_S`), textures shown from their first loaded mip, lost placed views refreshed (`VICTORY_TEXTURE_SWEEP`), dispatches over 65,535 groups split |
+| Walls, window frame and outfit wrong for a whole run, at random | during loading the list of remapped texture ranges overflowed and was thrown away, so which textures got re-checked depended on timing | the list is 32× larger and an overflow triggers a full re-check instead of a drop (found by comparing logs of runs with and without walls) |
 | The AMD shader compiler crashes (`amdxc64.dll`) on a few pipelines | driver bug on two pipelines | `victory translate --cache --pipelines` pre-builds every pipeline offline, saves as it goes, finds the crashing ones and skips them in game too |
 
 ## What you can expect (RX 9070 XT, Adrenalin 32.0.32029.2010, Series X mode)
@@ -29,9 +30,9 @@ No game files are included. You need your own legally obtained copy.
 | | Result |
 |---|---|
 | First cell | walls, window frame, posters and photos drawn; Lucia's face, hair and orange outfit render; inmates in the yard |
-| Speed, settings below | ~5.1–5.2 fps (≈195 ms/frame), three 14 min runs with no device removal |
+| Speed, settings below | ~4.8–5.2 fps (≈200 ms/frame); Lab 33 ran 41 min with no device removal, Lab 35 six 8 min runs with none |
 | Skipped shaders | only one left (`39f0e9aeb156a61c`, which never leaves the AMD compiler); the other 47 we used to skip now run on this card |
-| Cell walls | drawn in most runs but missing in some (sky where the wall should be), with the same settings: looks like a timing issue, under investigation |
+| Cell walls | drawn in 5 of 6 runs (about half before Lab 35). When they are missing, the window frame turns purple and the outfit dark for the whole run; still under investigation |
 | Still wrong | a purple tint on some papers and photos, stretched "web" triangles around some characters that change every frame, some textiles look wet, colour banding in skies |
 
 These are a few runs on one machine: other cards and drivers may behave differently.
