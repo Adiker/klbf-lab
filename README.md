@@ -27,7 +27,7 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 | Settings | — | renders at 1280×720 (`--console series-s`), upscaled to 1920×1080 with AMD FSR; dips to ~0.5–1 fps while a new area loads |
 | Frame rate in game, native resolution | 🟡 ~5 fps | about 200 ms per frame |
 | Stability | ✅ 74 min in one session without a crash | recommended settings; 41 min at native resolution |
-| Rendering | 🟡 Mostly right | cell walls, faces, hair and outfits drawn; purple tint on some papers, stretched triangles around some characters, banding in skies |
+| Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits too low in the water; the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings |
 | Story progress | ✅ Up to the start of Jason's first mission ("Gone Fishing") | played through Lucia's prologue (cell, office, the robbery, the arrest), then into Jason's first mission, driving the boat, in an 18 min session without a crash (test build Lab 37); there the boat floats too low in the water, so the mission fails |
 
 How we measure: the frame rate the layer logs about every 5 s, in the world only (loading screens and the first 2 minutes of shader compiling left out). Numbers are given per scene: standing in the prison cell, and while actually playing through the prologue and Jason's first mission (18 min session, test build Lab 37). Lows are taken from those 5 s averages, so single-frame dips may go lower.
