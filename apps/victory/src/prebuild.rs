@@ -69,6 +69,10 @@ pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     let cfg = victory_core::Config::load()?;
     let shaders_dir = cfg.cache_subdir("shaders")?;
     let dir = shaders_dir.with_file_name("pipelines");
+    // On a fresh cache the folder only appears when the library is first saved;
+    // without it the crash-tracking files below cannot be written and a crashed
+    // pre-build never resumes (reported by clems206 in PastiiJay/klbf-lab-beta#6).
+    std::fs::create_dir_all(&dir)?;
     // As a run: translations in `shaders`, the library in `pipelines`.
     victory_hle::modules::d3d12x::use_shader_cache(shaders_dir);
     println!("cache        {}", dir.display());
