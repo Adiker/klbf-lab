@@ -12,7 +12,7 @@
 
 To build it: `git clone -b beta https://github.com/PastiiJay/klbf-lab`, then the same steps as the main README (pipeline pre-build with `translate --cache --pipelines`, then `run`).
 
-This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the latest [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (25 Nov 2026, including triippywhale's AMD view-heap clamp and the skin/hair texture re-check; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`main`](https://github.com/PastiiJay/klbf-lab/tree/main). Previous test builds are kept as the tags `klbf-lab-33`, `klbf-lab-31`, `klbf-lab-28` and `klbf-lab-26`.
+This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the latest [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (25 Nov 2026, including triippywhale's AMD view-heap clamp and the skin/hair texture re-check; all rendering work there is its author's) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`main`](https://github.com/PastiiJay/klbf-lab/tree/main). Previous test builds are kept as the tags `klbf-lab-33`, `klbf-lab-31`, `klbf-lab-28` and `klbf-lab-26`.
 
 No game files are included. You need your own legally obtained copy.
 
@@ -23,7 +23,7 @@ No game files are included. You need your own legally obtained copy.
 
 | | What changed | Result on our RX 9070 XT |
 |---|---|---|
-| **Water physics** | the ocean height map the GPU writes each frame is copied back into the game's memory, where its physics reads it (ported from Geckomacabre/vx-layer); the XOR swizzle modes it is stored in are now addressed (ported from MiamiGame/XTP, tables from Mesa's addrlib) | in Jason's first mission the boat **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank; before, it sat on the seabed |
+| **Water physics** | the ocean height map the GPU writes each frame is copied back into the game's memory, where its physics reads it (ported from Geckomacabre/vx-layer); the XOR swizzle modes it is stored in are now addressed (ported from MiamiGame/XTP, tables from Mesa's addrlib) | in the second character's first mission the boat **floats and moves**: with only the throttle held it sailed over a minute (wake, objectives updating) before hitting the bank; before, it sat on the seabed |
 | **Menus and HUD in Series S mode** | the title's second present plane (interface) is read at the right place (Lab 38) | start screen, menus, map, HUD, subtitles and button prompts show; 41 min of play without a crash |
 | **AMD FSR frame generation** (optional) | `VICTORY_FRAMEGEN=1` presents through AMD's frame generation swap chain (FidelityFX SDK 2.4, `amd_fidelityfx_framegeneration_dx12.dll` in `VICTORY_FFX_FG_DIR` or `VICTORY_FFX_DIR`); off by default; the interface is not interpolated | ~8.5 real fps → ~17 fps shown in the world, no loss of real fps, 12 min without a crash. Generated frames, not real ones: input latency does not improve. Should work on any DX12 card; tested on AMD only |
 | **Pre-build on a fresh cache** | the `pipelines` folder is created first, so a crashed pre-build resumes ([#6](https://github.com/PastiiJay/klbf-lab-beta/issues/6), found by clems206) | |
@@ -52,7 +52,7 @@ What this project wrote itself, checked commit by commit (everything taken from 
 | Memory grows ~240 MB/s until Windows runs out | compute shader `39f0e9aeb156a61c` never leaves the AMD driver's compiler | skipped |
 | Purple/magenta blocks stuck on screen | console 32-lane pixel shaders run in 64-lane waves on AMD; NaN piled up in temporal buffers | 32-lane programs run per half wave; NaN/Inf filtered on colour outputs |
 | Missing or late textures | texture upload queue fixed at 192 MB / 250 ms per frame | configurable, larger by default (`VICTORY_TEXTURE_QUEUE_MB`, `VICTORY_TEXTURE_QUEUE_MS`) |
-| Characters missing or broken, faces absent | two meshlet-cull compute shaders hung on AMD and had to be skipped | upstream VIctory #334 (buffer-state tracking) ported; `fc5e66f8f873d3bb` no longer skipped: Lucia's face, hair and outfit render |
+| Characters missing or broken, faces absent | two meshlet-cull compute shaders hung on AMD and had to be skipped | upstream VIctory #334 (buffer-state tracking) ported; `fc5e66f8f873d3bb` no longer skipped: the first character's face, hair and outfit render |
 | Compute results not seen by other workgroups | `glc` loads not globally coherent on RDNA | upstream VIctory #1271 ported |
 | Lost or misplaced asset loads | DirectStorage page lists read after the title changed them | read at the title's submit (analysis by JappertjeV, [#3](https://github.com/PastiiJay/klbf-lab-beta/issues/3)); `VICTORY_PAGE_LIST=enqueue|submit|late` to compare |
 | Cell walls, window frame and posters missing (sky where the wall should be) | pipelines skipped while the world loads, textures streamed in part taken for others | ported from [myokex/victory-amd](https://github.com/myokex/victory-amd): pipelines kept across runs and waited for while a world loads (`VICTORY_PIPELINE_GATE_S`), textures shown from their first loaded mip, lost placed views refreshed (`VICTORY_TEXTURE_SWEEP`), dispatches over 65,535 groups split |
@@ -63,7 +63,7 @@ What this project wrote itself, checked commit by commit (everything taken from 
 
 | | Result |
 |---|---|
-| First cell | walls, window frame, posters and photos drawn; Lucia's face, hair and orange outfit render; inmates in the yard |
+| First cell | walls, window frame, posters and photos drawn; the first character's face, hair and orange outfit render; inmates in the yard |
 | Speed, Series S mode + AMD FSR (recommended) | **~7.3 fps (median), 74 min with no device removal**, walls drawn throughout |
 | Speed, Series X mode | ~4.8–5.2 fps (≈200 ms/frame); 41 min with no device removal (Lab 33) |
 | Skipped shaders | only one left (`39f0e9aeb156a61c`, which never leaves the AMD compiler); the other 47 we used to skip now run on this card |
