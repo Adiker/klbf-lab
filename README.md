@@ -1,13 +1,13 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab 28 — AMD test branch</h1>
+<h1 align="center">KLBF Lab 31 — AMD test branch</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/test-Lab%2028-ff7a00" alt="test: Lab 28">
+  <img src="https://img.shields.io/badge/test-Lab%2031-ff7a00" alt="test: Lab 31">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
-  <img src="https://img.shields.io/badge/stable-5.6%20fps-ff7a00" alt="5.6 fps stable">
+  <img src="https://img.shields.io/badge/stable-5.2%20fps-ff7a00" alt="5.2 fps stable">
 </p>
 
-This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the newer [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (`4e17478`; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab). The previous test build is kept as the tag `klbf-lab-26`.
+This branch is for **AMD Radeon (RDNA, 64-lane) cards**. It builds on the newer [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (`4e17478`; all rendering work there is its author's, see [README.fxceless.md](README.fxceless.md)) and adds fixes found on an RX 9070 XT, plus fixes from other contributors credited below. It is a test build: expect visual defects. The stable branch is [`klbf-lab`](https://github.com/PastiiJay/klbf-lab). Previous test builds are kept as the tags `klbf-lab-28` and `klbf-lab-26`.
 
 No game files are included. You need your own legally obtained copy.
 
@@ -21,15 +21,16 @@ No game files are included. You need your own legally obtained copy.
 | Characters missing or broken, faces absent | two meshlet-cull compute shaders hung on AMD and had to be skipped | upstream VIctory #334 (buffer-state tracking) ported; `fc5e66f8f873d3bb` no longer skipped: Lucia's face, hair and outfit render |
 | Compute results not seen by other workgroups | `glc` loads not globally coherent on RDNA | upstream VIctory #1271 ported |
 | Lost or misplaced asset loads | DirectStorage page lists read after the title changed them | read at the title's submit (analysis by JappertjeV, [#3](https://github.com/PastiiJay/klbf-lab/issues/3)); `VICTORY_PAGE_LIST=enqueue|submit|late` to compare |
+| Cell walls, window frame and posters missing (sky where the wall should be) | pipelines skipped while the world loads, textures streamed in part taken for others | ported from [myokex/victory-amd](https://github.com/myokex/victory-amd): pipelines kept across runs and waited for while a world loads (`VICTORY_PIPELINE_GATE_S`), textures shown from their first loaded mip, lost placed views refreshed (`VICTORY_TEXTURE_SWEEP`), dispatches over 65,535 groups split |
 | The AMD shader compiler crashes (`amdxc64.dll`) on a few pipelines | driver bug on two pipelines | `victory translate --cache --pipelines` pre-builds every pipeline offline, saves as it goes, finds the crashing ones and skips them in game too |
 
 ## What you can expect (RX 9070 XT, Adrenalin 32.0.32029.2010, Series X mode)
 
 | | Result |
 |---|---|
-| First cell | drawn; Lucia's face, hair and outfit render; inmates in the yard |
-| Speed, settings below | ~5.6 fps (≈180 ms/frame), 14 min with no device removal in our run; ~6 fps in a 12 min run |
-| Still wrong | ambient light comes out purple on window frames, stretched "web" triangles around some characters that change every frame, some textiles look wet, colour banding in skies |
+| First cell | walls, window frame, posters and photos drawn; Lucia's face, hair and orange outfit render; inmates in the yard |
+| Speed, settings below | ~5.2 fps (≈195 ms/frame), 14 min with no device removal in our run (Lab 28 without the wall fixes: ~5.6 fps) |
+| Still wrong | a purple tint on some papers and photos, stretched "web" triangles around some characters that change every frame, some textiles look wet, colour banding in skies |
 
 These are a few runs on one machine: other cards and drivers may behave differently.
 
