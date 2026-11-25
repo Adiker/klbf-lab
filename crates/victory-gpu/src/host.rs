@@ -5891,14 +5891,10 @@ fn read(src: *const u8, dst: *mut u8, len: usize) -> bool {
     if len == 0 {
         return true;
     }
-    if len >= (256 << 10) && mapped_whole(src as usize, len, false) {
-        // SAFETY: every page of both ranges is committed and readable or
-        // writable (`mapped_whole`); `dst` is ours and writable.
-        unsafe { std::ptr::copy_nonoverlapping(src, dst, len) };
-        #[cfg(feature = "diagnostics")]
-        crate::copystat::add(crate::copystat::C::MoveFast, len as u64);
-        return true;
-    }
+    // (No `VirtualQuery`-then-memcpy fast path: the title can decommit or
+    // remap the range between the question and the copy, and a plain copy
+    // then faults; one did, reading a page reserved but never committed.
+    // The kernel copy below fails cleanly instead.)
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     let mut done = 0usize;
     // SAFETY: the destination is mapped writable memory of `len` bytes; the
@@ -5982,18 +5978,10 @@ pub(crate) fn write_mapped(dst: *mut u8, src: *const u8, len: usize) {
     // memory speed and give the holes to the kernel, one piece at a time.
     let mut at = dst as usize;
     let end = at + len;
+    // (No `mapped_run`-then-memcpy fast path: the title can decommit or
+    // remap the range, and a guard can make it read-only, between the
+    // question and the copy; the kernel copy fails cleanly instead.)
     while at < end {
-        if let Some(to) = mapped_run(at, end, true) {
-            // SAFETY: the destination's pages are committed and writable
-            // (`mapped_run`), the source is our host copy.
-            unsafe {
-                std::ptr::copy_nonoverlapping(src.wrapping_add(at - dst as usize), at as *mut u8, to - at)
-            };
-            #[cfg(feature = "diagnostics")]
-            crate::copystat::add(crate::copystat::C::MoveFast, (to - at) as u64);
-            at = to;
-            continue;
-        }
         let step = 64 << 10;
         let to = ((at / step + 1) * step).min(end);
         if !write(at, to - at) {
