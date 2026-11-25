@@ -7,7 +7,7 @@
   <a href="https://github.com/PastiiJay/klbf-lab-beta"><img src="https://img.shields.io/github/stars/PastiiJay/klbf-lab-beta?label=KLBF%20Lab%20Beta%20stars&color=555" alt="KLBF Lab Beta stars"></a>
 </p>
 
-<p align="center"><b>~7 fps in the prison prologue, into Jason's first mission ("Gone Fishing", up to the seaplane), on an AMD Radeon RX 9070 XT.</b></p>
+<p align="center"><b>Lucia's prologue and Jason's first mission ("Gone Fishing") played to the end, 3% of the story, first manual save, on an AMD Radeon RX 9070 XT.</b></p>
 
 An open lab that runs the Xbox Series X|S (Scarlett) build of the game natively on a Windows PC: a GDK compatibility layer (`kernelx`, `xgameruntime`, `d3d12_xs` → host D3D12, RDNA2 → DXIL shader translation) that combines the best fixes from open compatibility projects into one tested build. Our own fixes (AMD Radeon stability and rendering, water physics, pre-building pipelines, optional AMD FSR frame generation) and fixes from other contributors, credited below.
 
@@ -28,7 +28,7 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 | Frame rate in game, native resolution | 🟡 ~5 fps | about 200 ms per frame |
 | Stability | ✅ 74 min in one session without a crash | recommended settings; 41 min at native resolution |
 | Rendering | 🟡 Mostly right | walls, lighting, hair and outfits drawn; purple tint on small flat objects (posters, stickers, towels), some faces deformed (guards, bank), faint diagonal lines on surfaces, the boat sits on the seabed (water physics fixed in test build Lab 39); the HUD (subtitles, objectives, prompts) stays hidden with the recommended settings in this version; fixed in test build Lab 38 (KLBF Lab Beta) |
-| Story progress | ✅ Into Jason's first mission ("Gone Fishing"), up to the seaplane | played through Lucia's prologue (cell, office, the robbery, the arrest), then Jason's first mission: the boat, the swamp on foot, the camp, the seaplane, in a 41 min session without a crash (test build Lab 38); water checkpoints passed by skipping after 3 failures (see Water) |
+| Story progress | ✅ Prologue and Jason's first mission ("Gone Fishing") completed: 3% of the story | played through Lucia's prologue, then all of "Gone Fishing" (the boat, the swamp, the camp, Donnie, the seaplane, the water landing, the night drive home) in a 77 min session without a crash (test build Lab 39); the game's autosave and the first **manual save** ("Gone Fishing (3%)") work |
 
 ### Why AMD FSR
 
@@ -48,7 +48,9 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 | Jason's first mission ("Gone Fishing"): the boat | 🟡 passed by skipping | 6.3 / 9.8 | the boat sits on the seabed and does not move, so the chase fails; after 3 failed tries the game offers to skip the checkpoint |
 | "Gone Fishing": on foot in the swamp, the camp, finding Donnie | ✅ | 5.2 average / 12.9 peak (whole 41 min session, test build Lab 38) | first fight works; in the water the character stands on the bottom and cannot climb out (same cause as the boat: water physics) |
 | "Gone Fishing": the seaplane and the landing | 🟡 reached | (same session) | the seaplane stays under water and its engine is destroyed; skipping after 3 failures got past take-off, the landing sends back to the previous checkpoint |
-| Further | ⏳ next | — | water physics fixed in test build Lab 39 (see below); full play-through next |
+| "Gone Fishing": the seaplane, the water landing, the night drive home | ✅ (test build Lab 39) | ~5.2 average / 12.5 peak over the 77 min session; ~9 in flight | mission completed; at night the vegetation turns magenta and the ground stays very dark |
+| Jason's house, first manual save | ✅ (test build Lab 39) | — | the bed saves the game; the save menu shows "Gone Fishing (3%)" |
+| Further | ⏳ next | — | the next missions |
 
 ### Milestones
 
@@ -61,6 +63,7 @@ How far the project gets in the story, scene by scene (one machine: AMD Radeon R
 | 25 Nov 2026 | Lab 31 | the cell drawn with its walls |
 | 25 Nov 2026 | Lab 35 | 74 min in one session without a crash; prologue ~7.3 fps in the cell |
 | 25 Nov 2026 | Lab 37 | played from the prologue to the start of Jason's first mission ("Gone Fishing"), peak 9.8 fps |
+| 25 Nov 2026 | Lab 39 (test) | water physics fixed: "Gone Fishing" completed, 3% of the story, first manual save, 77 min of play without a crash |
 | 25 Nov 2026 | Lab 38 (test) | menus, map, HUD, subtitles and button prompts show in Series S mode; 41 min of play without a crash; "Gone Fishing" played up to the seaplane, peak 12.9 fps |
 
 How we measure: the frame rate the layer logs about every 5 s, in the world only (loading screens and the first 2 minutes of shader compiling left out). Numbers are given per scene: standing in the prison cell, and while actually playing through the prologue and Jason's first mission (18 min session, test build Lab 37). Lows are taken from those 5 s averages, so single-frame dips may go lower.
