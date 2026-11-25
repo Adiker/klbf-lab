@@ -113,6 +113,9 @@ These are a few runs on one machine: other cards and drivers may behave differen
 
 ## Run
 
+> [!IMPORTANT]
+> **Before the first run, get AMD's FidelityFX SDK.** The recommended settings (`--console series-s`) use AMD FSR, which needs AMD's DLLs. Download **FidelityFX SDK v2.4.0** from its official page ([GPUOpen-LibrariesAndSDKs/FidelityFX-SDK, releases](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases)), unzip it, and set `VICTORY_FFX_DIR` to its `Kits\FidelityFX\signedbin` folder (it holds `amd_fidelityfx_loader_dx12.dll`). Without it the log says `amd_fidelityfx_loader_dx12.dll not found` and the game crashes once it starts upscaling. No SDK? Run without `--console series-s` (no FSR, slower).
+
 Build like VIctory (`cargo build --release`), then pre-build the pipelines once (about 10 minutes, rerun it until it ends without a crash):
 
 ```powershell
