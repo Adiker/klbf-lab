@@ -7,7 +7,7 @@
   <a href="https://github.com/PastiiJay/klbf-lab-beta"><img src="https://img.shields.io/github/stars/PastiiJay/klbf-lab-beta?label=KLBF%20Lab%20Beta%20stars&color=555" alt="KLBF Lab Beta stars"></a>
 </p>
 
-<p align="center"><b>7.3 fps in game, 74 minutes in one session without a crash, on an AMD Radeon RX 9070 XT.</b></p>
+<p align="center"><b>7.3 fps on average in game, 74 minutes in one session without a crash, on an AMD Radeon RX 9070 XT.</b></p>
 
 An open lab that runs the Xbox Series X|S (Scarlett) build of the game natively on a Windows PC: a GDK compatibility layer (`kernelx`, `xgameruntime`, `d3d12_xs` → host D3D12, RDNA2 → DXIL shader translation) that combines the best fixes from open compatibility projects into one tested build. It builds on [VIctory](https://github.com/Marvisak/VIctory) and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (all rendering work there is its authors', see [README.fxceless.md](README.fxceless.md)), with fixes found on our own machine and fixes from other contributors, credited below.
 
@@ -21,7 +21,7 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 |---|---|---|
 | Boot, first-run screens, intro, menus | ✅ Works | 30 fps |
 | In game (prison prologue) | ✅ Player in control | the character moves under the player's control; earlier builds reached the first mission's robbery |
-| Frame rate in game, recommended settings | 🟡 ~7.3 fps | median of 817 samples; renders at 1280×720 (`--console series-s`), upscaled to 1920×1080 with AMD FSR |
+| Frame rate in game, recommended settings | 🟡 ~7.3 fps | average over the whole 74 min run (mean 7.25, median 7.3; at or above 7.2 fps 90% of the time, peak 7.7; 817 samples); renders at 1280×720 (`--console series-s`), upscaled to 1920×1080 with AMD FSR |
 | Frame rate in game, native resolution | 🟡 ~5 fps | about 200 ms per frame |
 | Stability | ✅ 74 min in one session without a crash | recommended settings; 41 min at native resolution |
 | Rendering | 🟡 Mostly right | cell walls, faces, hair and outfits drawn; purple tint on some papers, stretched triangles around some characters, banding in skies |
