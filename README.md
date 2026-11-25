@@ -32,6 +32,19 @@ No game files are included. You need your own legally obtained copy.
 
 Speed in Lab 39 runs: median 6.6–8.4 fps in the world (720p upscaled to 1080p with AMD FSR). Stability record: 77 min of play without a crash on Lab 39 (stopped by choice); it has never crashed in our test runs. If the device is lost about a minute after the world starts loading, try `VICTORY_LATE_WAIT=0`.
 
+## Built by KLBF Lab
+
+What this project wrote itself (everything taken from other forks is listed, with credit, in [Credits](#credits)):
+
+- **AMD pipeline pre-build that survives the driver.** `translate --cache --pipelines` builds every pipeline of the shader pack ahead of time. It saves progress as it goes (every 200 pipelines and every minute) and resumes after a crash. Pipelines that crash AMD's shader compiler are recorded in `prebuild-crashed.txt`, and later runs skip them. This is what lets the game start on Radeon cards where other builds crash in `amdxc64.dll`.
+- **Console wave32 programs on 64-lane AMD hardware.** Each half of a 64-lane wave runs as one console wave, with wave reductions done per half and denormals flushed only on request. This is the base of correct pixel and vertex shading on RDNA.
+- **NaN guard on colour exports and typed stores**, against the purple/black pixels a single invalid value spreads on AMD. Also proposed upstream as fxceless/victory-fork#837.
+- **Console-accurate presentation.** The title's planes are composed as the console does (game image + interface plane), so menus, HUD and subtitles show in Series S mode.
+- **AMD FidelityFX on PC.** The title's FSR upscale runs through AMD's signed FidelityFX SDK 2.4, with a no-SDK fallback (`VICTORY_FFX_SIMPLE`) and optional AMD frame generation (`VICTORY_FRAMEGEN=1`).
+- **Shader and pipeline fixes for this title.** Heap descriptors that a program writes become UAVs program-wide. The early pipeline list is kept across runs, and the texture upload queue gets a per-frame budget.
+- **Proven in play, on our own saves.** From a new game to the open world: the prologue and the first mission completed, including the water mission with boats floating (texture copy-back and XOR swizzle integrated from Geckomacabre/vx-layer and MiamiGame/XTP). Record: 77 min of play without a crash.
+- **A beginner's guide** ([docs/GUIDE.md](https://github.com/PastiiJay/klbf-lab/blob/main/docs/GUIDE.md)) with every command to copy and paste, Windows 10 and Linux notes, and a troubleshooting table built from players' reports.
+
 ## What it fixes on AMD
 
 | Problem on AMD | Cause we found | In this branch |
