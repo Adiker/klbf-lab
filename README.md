@@ -2,10 +2,12 @@
 <h1 align="center">KLBF Lab</h1>
 <p align="center">
   <img src="https://img.shields.io/badge/version-Lab%2035-1f46c8" alt="version: Lab 35">
-  <img src="https://img.shields.io/badge/~7%20fps-in%20game-1f46c8" alt="about 7 fps in game">
+  <img src="https://img.shields.io/badge/7.3%20fps-74%20min%20without%20a%20crash-1f46c8" alt="7.3 fps, 74 min without a crash">
   <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
   <a href="https://github.com/PastiiJay/klbf-lab-beta"><img src="https://img.shields.io/github/stars/PastiiJay/klbf-lab-beta?label=KLBF%20Lab%20Beta%20stars&color=555" alt="KLBF Lab Beta stars"></a>
 </p>
+
+<p align="center"><b>7.3 fps in game, 74 minutes in one session without a crash, on an AMD Radeon RX 9070 XT.</b></p>
 
 An open lab that runs the Xbox Series X|S (Scarlett) build of the game natively on a Windows PC: a GDK compatibility layer (`kernelx`, `xgameruntime`, `d3d12_xs` → host D3D12, RDNA2 → DXIL shader translation) that combines the best fixes from open compatibility projects into one tested build. It builds on [VIctory](https://github.com/Marvisak/VIctory) and the [fxceless/victory-fork](https://github.com/fxceless/victory-fork) (all rendering work there is its authors', see [README.fxceless.md](README.fxceless.md)), with fixes found on our own machine and fixes from other contributors, credited below.
 
