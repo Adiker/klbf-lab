@@ -15,7 +15,7 @@ No cherry-picked numbers: these come from ordinary play, not from a quiet scene 
 
 | Situation | fps |
 |---|---|
-| Standing still, looking at the sky | 20–23 |
+| Standing still, looking at the sky | 20–23, peaks at 27 |
 | On foot in a quiet area (by a lake or a river) | 16–21, peaks at 23 |
 | Standing still in traffic, busy neighbourhood | 15–17 |
 | On foot on a motorway slip road | 15–16 |
