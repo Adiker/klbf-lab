@@ -1261,9 +1261,62 @@ extern "system" fn present(
 type Named = Option<(usize, Option<usize>)>;
 
 /// [`present`], when its turn has come.
+/// (ours) `VICTORY_PIPELINES_FIRST` (on by default; `0`: off): while the title shows its
+/// start and loading screens (a frame of fewer than 64 draws) and host pipelines are still
+/// being made, a present waits for them, up to a second and a half at a time and five
+/// minutes in a run.
+///
+/// The title creates its pipelines while it starts, and the ones earlier runs drew with are
+/// made then on eight threads of ours and the driver's own. From the library that takes
+/// half a minute and is over before the world. After a new build, a new driver or on a
+/// first run they are compiled: 2,300 of them took one to four minutes (2026-11-25), the
+/// world appeared in the middle of it, and with every core busy its first frames took up
+/// to sixteen seconds each and the title's own page mapping calls 150 to 450 microseconds
+/// instead of 8. Held on its loading screen, the title cannot go on into the world before
+/// the pipelines are there; its loader's threads go on reading meanwhile.
+#[cfg(windows)]
+fn hold_for_pipelines() {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var_os("VICTORY_PIPELINES_FIRST").is_none_or(|v| v != "0")) {
+        return;
+    }
+    // This frame's draws: the counter is taken (set back) by the frame line now and then.
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let drawn = crate::draw::drawn();
+    let last = LAST.swap(drawn, Ordering::Relaxed);
+    let frame = if drawn >= last { drawn - last } else { drawn };
+    if frame >= 64 || crate::pipeline::making() == 0 {
+        return;
+    }
+    static HELD_MS: AtomicU64 = AtomicU64::new(0);
+    static SAID: AtomicU64 = AtomicU64::new(0);
+    const MOST_MS: u64 = 300_000;
+    if HELD_MS.load(Ordering::Relaxed) >= MOST_MS {
+        return;
+    }
+    if SAID.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+        tracing::info!(
+            waiting = crate::pipeline::making(),
+            "presents of the title's start and loading screens wait while host pipelines are made (VICTORY_PIPELINES_FIRST=0: they do not)"
+        );
+    }
+    let began = std::time::Instant::now();
+    while crate::pipeline::making() > 0 && began.elapsed() < std::time::Duration::from_millis(1500) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let total = HELD_MS.fetch_add(began.elapsed().as_millis() as u64, Ordering::Relaxed) + began.elapsed().as_millis() as u64;
+    if crate::pipeline::making() == 0 && SAID.compare_exchange(1, 2, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+        tracing::info!(seconds = total / 1000, "host pipelines are made: the title's presents wait no longer");
+    }
+}
+
 fn present_now(named: Named) {
+    #[cfg(windows)]
+    hold_for_pipelines();
     #[cfg(all(windows, feature = "diagnostics"))]
     crate::copystat::present_begins();
+    #[cfg(all(windows, feature = "diagnostics"))]
+    crate::profile::frame();
     // Submissions sent to the card and not waited for are settled first,
     // and what that frees runs in its own order, before anything is forced.
     #[cfg(windows)]

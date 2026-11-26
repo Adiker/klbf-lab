@@ -356,7 +356,35 @@ pub extern "system" fn XMemIsToolsMemAvailable() -> BOOL {
 
 const PAGE: usize = 64 << 10;
 
-struct Section(HANDLE);
+struct Section(HANDLE, Whole);
+
+/// (ours) A view of our own of a whole section, kept for as long as the section lives, and
+/// which of the section's pages are committed.
+///
+/// What writes physical pages for the title (DirectStorage's workers) made a view of its
+/// own for every request, committed it and took it away again: three calls into the kernel
+/// that each take the process's address space for themselves, the last one clearing every
+/// processor's translations. A load makes some thousand requests a second on up to sixteen
+/// threads beside the title's own mapping calls, and all of them stood in line for one
+/// another: a mapping call of the title's took 8 microseconds before the world and 150 to
+/// 450 while it streamed in (2026-11-25), and the workers stood eight to fifteen deep.
+/// Through a view that stays, a write is a copy and nothing else (measured on this PC:
+/// 0.8 microseconds for 128 KiB against 29 for map, write and unmap).
+///
+/// A commit belongs to the section, not to the view it was made through (tried on this
+/// PC: pages committed through one view read as committed through another, also one mapped
+/// later), so a page is committed once and the title's own mapping calls skip the call too.
+struct Whole {
+    /// Bytes of the section.
+    size: usize,
+    /// The view's address; 0 until it is first asked for, [`REFUSED`] if the host would not.
+    base: AtomicUsize,
+    /// A bit for each page: committed.
+    committed: Box<[std::sync::atomic::AtomicU64]>,
+}
+
+/// In `Whole::base`: the host refused the view.
+const REFUSED: usize = 1;
 
 // SAFETY: a section handle may be used from any thread.
 unsafe impl Send for Section {}
@@ -365,10 +393,112 @@ unsafe impl Sync for Section {}
 
 impl Drop for Section {
     fn drop(&mut self) {
+        use windows_sys::Win32::System::Memory::UnmapViewOfFile;
+        let base = *self.1.base.get_mut();
+        if base != 0 && base != REFUSED {
+            // SAFETY: our own view of the whole section; nothing uses it once the last
+            // slice (which holds the section) is gone.
+            unsafe { UnmapViewOfFile(MEMORY_MAPPED_VIEW_ADDRESS { Value: base as *mut c_void }) };
+        }
         // SAFETY: our handle; views keep the section alive on their own.
         unsafe { CloseHandle(self.0) };
     }
 }
+
+impl Section {
+    fn new(handle: HANDLE, size: usize) -> Section {
+        let words = size.div_ceil(PAGE).div_ceil(64);
+        Section(
+            handle,
+            Whole {
+                size,
+                base: AtomicUsize::new(0),
+                committed: (0..words).map(|_| std::sync::atomic::AtomicU64::new(0)).collect(),
+            },
+        )
+    }
+
+    /// Whether pages `[index, index + n)` are all known to be committed.
+    fn committed(&self, index: usize, n: usize) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        (index..index + n).all(|p| self.1.committed.get(p / 64).is_some_and(|w| w.load(Relaxed) & 1 << (p % 64) != 0))
+    }
+
+    /// Pages `[index, index + n)` have been committed (through whichever view).
+    fn mark_committed(&self, index: usize, n: usize) {
+        use std::sync::atomic::Ordering::Relaxed;
+        for p in index..index + n {
+            if let Some(word) = self.1.committed.get(p / 64) {
+                word.fetch_or(1 << (p % 64), Relaxed);
+            }
+        }
+    }
+
+    /// Our view of the whole section, mapped when first asked for; `None` if the host
+    /// refuses it (said once).
+    fn whole(&self) -> Option<usize> {
+        use std::sync::atomic::Ordering::{AcqRel, Acquire};
+        use windows_sys::Win32::System::Memory::{FILE_MAP_WRITE, MapViewOfFile, UnmapViewOfFile};
+        match self.1.base.load(Acquire) {
+            0 => {}
+            REFUSED => return None,
+            base => return Some(base),
+        }
+        // SAFETY: a view of a section we own, ours until the section is dropped. A reserved
+        // section's view is a reservation: nothing is committed by it.
+        let at = unsafe { MapViewOfFile(self.0, FILE_MAP_WRITE, 0, 0, 0) };
+        let made = if at.Value.is_null() {
+            static SAID: std::sync::Once = std::sync::Once::new();
+            let error = std::io::Error::last_os_error();
+            SAID.call_once(|| {
+                tracing::warn!(size = self.1.size, %error, "no standing view of a section of physical pages: its writes go through views of their own, as before")
+            });
+            REFUSED
+        } else {
+            at.Value as usize
+        };
+        match self.1.base.compare_exchange(0, made, AcqRel, Acquire) {
+            Ok(_) => (made != REFUSED).then_some(made),
+            Err(theirs) => {
+                // Another thread was first: its view stays.
+                if made != REFUSED {
+                    // SAFETY: the view just made, used by nobody.
+                    unsafe { UnmapViewOfFile(at) };
+                }
+                (theirs != REFUSED).then_some(theirs)
+            }
+        }
+    }
+
+    /// Pages `[index, index + n)` in the standing view, committed: where they are. `None`
+    /// if there is no such view or the host will not commit them.
+    fn standing(&self, index: usize, n: usize) -> Option<*mut u8> {
+        let (offset, len) = (index.checked_mul(PAGE)?, n.checked_mul(PAGE)?);
+        if offset.checked_add(len)? > self.1.size {
+            return None;
+        }
+        let base = self.whole()?;
+        if !self.committed(index, n) {
+            if !commit(base + offset, len) {
+                return None;
+            }
+            self.mark_committed(index, n);
+        }
+        Some((base + offset) as *mut u8)
+    }
+}
+
+/// (ours) Whether writes into physical pages go through their section's standing view
+/// ([`Whole`]; `VICTORY_SECTION_VIEWS=0`: through a view made for each, as before).
+fn section_views() -> bool {
+    static ON: LazyLock<bool> = LazyLock::new(|| std::env::var_os("VICTORY_SECTION_VIEWS").is_none_or(|v| v != "0"));
+    *ON
+}
+
+/// (ours) Since the last line: windows and runs written through a section's standing view,
+/// through a view of their own, and mapping calls of the title's that found their pages
+/// committed already and did not ask again ([`work_line`]).
+static STANDING: [std::sync::atomic::AtomicU64; 3] = [const { std::sync::atomic::AtomicU64::new(0) }; 3];
 
 /// Where a page lives, or what a view starts with: a section and a page
 /// index in it.
@@ -454,7 +584,7 @@ pub extern "system" fn XMemAllocatePhysicalPages(
     // For the GPU side's in-place census: only a committed section can be
     // opened as a host heap.
     victory_gpu::title_memory_section(handle as usize, size as u64, on_wine());
-    let section = Arc::new(Section(handle));
+    let section = Arc::new(Section::new(handle, size));
     let mut physical = physical();
     let first = physical.next_page;
     physical.next_page += n * FRAMES;
@@ -515,7 +645,11 @@ impl View {
             return None;
         }
         let view = View { at, len };
-        commit(at.Value as usize, len).then_some(view)
+        if !commit(at.Value as usize, len) {
+            return None;
+        }
+        slice.section.mark_committed(slice.index, n);
+        Some(view)
     }
 
     fn bytes(&mut self) -> &mut [u8] {
@@ -576,11 +710,19 @@ pub(crate) fn write_physical(pages: &[usize], offset: usize, data: &[u8]) -> boo
     };
     let (mut within, mut done) = (offset % PAGE, 0);
     for (slice, n) in &runs {
-        let Some(mut view) = View::map(slice, *n) else {
-            return false;
-        };
         let k = (n * PAGE - within).min(data.len() - done);
-        view.bytes()[within..within + k].copy_from_slice(&data[done..done + k]);
+        if let Some(at) = section_views().then(|| slice.section.standing(slice.index, *n)).flatten() {
+            // SAFETY: the run's pages in the section's standing view, committed; `within + k`
+            // lies inside them, and `data` holds `done + k` bytes.
+            unsafe { std::ptr::copy_nonoverlapping(data.as_ptr().add(done), at.add(within), k) };
+            STANDING[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            let Some(mut view) = View::map(slice, *n) else {
+                return false;
+            };
+            view.bytes()[within..within + k].copy_from_slice(&data[done..done + k]);
+            STANDING[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         (within, done) = (0, done + k);
         written(slice, *n);
     }
@@ -612,7 +754,12 @@ fn written(slice: &Slice, n: usize) {
 /// until dropped: DirectStorage decodes into it instead of a buffer it
 /// would then copy.
 pub(crate) struct PageWindow {
-    view: View,
+    /// A view made for this window alone, where the section's standing view was not to be
+    /// had (or with `VICTORY_SECTION_VIEWS=0`); taken away with the window.
+    _view: Option<View>,
+    /// The window's pages: where they are, and how many.
+    at: *mut u8,
+    pages: usize,
     within: usize,
     len: usize,
     slice: Slice,
@@ -620,14 +767,17 @@ pub(crate) struct PageWindow {
 
 impl Drop for PageWindow {
     fn drop(&mut self) {
-        written(&self.slice, self.view.len / PAGE);
+        written(&self.slice, self.pages);
     }
 }
 
 impl PageWindow {
     pub(crate) fn bytes(&mut self) -> &mut [u8] {
-        let (within, len) = (self.within, self.len);
-        &mut self.view.bytes()[within..within + len]
+        // SAFETY: `pages` committed read-write pages at `at` (a view of our own, or the
+        // window's part of the section's standing view, which the slice keeps alive), and
+        // `within + len` lies inside them ([`page_window`]); ours alone while `self` lives
+        // (other views of the pages only alias them, as the console's do).
+        unsafe { std::slice::from_raw_parts_mut(self.at.add(self.within), self.len) }
     }
 }
 
@@ -641,9 +791,28 @@ pub(crate) fn page_window(pages: &[usize], offset: usize, len: usize) -> Option<
     let [(slice, n)] = runs.as_slice() else {
         return None;
     };
+    let within = offset % PAGE;
+    if within.checked_add(len)? > n * PAGE {
+        return None;
+    }
+    if let Some(at) = section_views().then(|| slice.section.standing(slice.index, *n)).flatten() {
+        STANDING[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        return Some(PageWindow {
+            _view: None,
+            at,
+            pages: *n,
+            within,
+            len,
+            slice: slice.clone(),
+        });
+    }
+    let mut view = View::map(slice, *n)?;
+    STANDING[1].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Some(PageWindow {
-        view: View::map(slice, *n)?,
-        within: offset % PAGE,
+        at: view.bytes().as_mut_ptr(),
+        _view: Some(view),
+        pages: *n,
+        within,
         len,
         slice: slice.clone(),
     })
@@ -963,6 +1132,37 @@ fn alias_runs() -> bool {
 /// five seconds in which any were made ([`work_line`]).
 static WORK: [std::sync::atomic::AtomicU64; 12] = [const { std::sync::atomic::AtomicU64::new(0) }; 12];
 
+/// (ours) The kernel's own calls that map (0) and unmap (1) a view, by what threads of the
+/// graphics layer were inside when the call began: a write-watch asking, a change of
+/// protection, neither. Per kind and case: calls, microseconds, and the calls that took
+/// over 100 microseconds. To say what the title's mapping calls wait behind in a load
+/// (8 microseconds a call before the world, 150 to 450 in it, 2026-11-25).
+static KERNEL: [[[std::sync::atomic::AtomicU64; 3]; 3]; 2] =
+    [const { [const { [const { std::sync::atomic::AtomicU64::new(0) }; 3] }; 3] }; 2];
+
+struct Kernel(usize, usize, std::time::Instant);
+
+impl Kernel {
+    fn begin(kind: usize) -> Kernel {
+        let [asking, protecting] = victory_gpu::address_calls();
+        let case = if asking > 0 { 0 } else if protecting > 0 { 1 } else { 2 };
+        Kernel(kind, case, std::time::Instant::now())
+    }
+}
+
+impl Drop for Kernel {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let us = self.2.elapsed().as_micros() as u64;
+        let at = &KERNEL[self.0][self.1];
+        at[0].fetch_add(1, Relaxed);
+        at[1].fetch_add(us, Relaxed);
+        if us > 100 {
+            at[2].fetch_add(1, Relaxed);
+        }
+    }
+}
+
 fn work_line() {
     use std::sync::atomic::Ordering::Relaxed;
     static LAST: Mutex<Option<std::time::Instant>> = Mutex::new(None);
@@ -977,6 +1177,31 @@ fn work_line() {
     }
     *last = Some(now);
     let w = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(|i| WORK[i].swap(0, Relaxed));
+    {
+        let mut text = String::new();
+        for (kind, name) in ["map", "unmap"].iter().enumerate() {
+            for (case, when) in ["a write-watch asking", "a change of protection", "neither"].iter().enumerate() {
+                let [calls, us, slow] = [0, 1, 2].map(|i| KERNEL[kind][case][i].swap(0, Relaxed));
+                if calls > 0 {
+                    text.push_str(&format!(
+                        " {name} with {when} under way: {calls} calls, {:.0} us each, {slow} over 100 us;",
+                        us as f64 / calls as f64
+                    ));
+                }
+            }
+        }
+        if !text.is_empty() {
+            tracing::info!("the kernel's page mapping calls over {secs:.0} s:{text}");
+        }
+    }
+    {
+        let [standing, own, skipped] = [0, 1, 2].map(|i| STANDING[i].swap(0, Relaxed));
+        if standing + own + skipped > 0 {
+            tracing::info!(
+                "writes into physical pages over {secs:.0} s: {standing} through their section's standing view, {own} through a view made for them (VICTORY_SECTION_VIEWS=0: all); {skipped} mapping calls found their pages committed and did not ask again"
+            );
+        }
+    }
     tracing::info!(
         "title memory remapped, a second over {secs:.0} s: {:.0} views taken away in {:.1} ms, {:.0} made in {:.1} ms; {:.0} calls of the title, {:.1} ms in them; pages asked for: {:.0} mapped or unmapped ({:.0} of them there already, {:.0} of nothing unmapped: nothing done), {:.0} of copied mappings ({:.0} there already)",
         w[0] as f64 / secs,
@@ -1091,6 +1316,7 @@ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
     // SAFETY: splits the placeholder around the range (failing harmlessly
     // when the range is the whole placeholder), then maps the section
     // there; both act only on placeholders.
+    let kernel = Kernel::begin(0);
     let view = unsafe {
         VirtualFree(
             base as *mut c_void,
@@ -1109,6 +1335,7 @@ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
             0,
         )
     };
+    drop(kernel);
     if view.Value as usize != base {
         tracing::warn!(
             address = format_args!("{base:#x}"),
@@ -1118,10 +1345,16 @@ fn map(physical: &mut Physical, base: usize, len: usize, slice: Slice) -> bool {
         );
         return false;
     }
-    if !commit(base, len) {
-        // SAFETY: the view just mapped, back to a placeholder.
-        unsafe { UnmapViewOfFile2(GetCurrentProcess(), view, MEM_PRESERVE_PLACEHOLDER) };
-        return false;
+    // (ours) Committed once per page, whichever view (`Whole`): asked only for pages not yet.
+    if section_views() && slice.section.committed(slice.index, len / PAGE) {
+        STANDING[2].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    } else {
+        if !commit(base, len) {
+            // SAFETY: the view just mapped, back to a placeholder.
+            unsafe { UnmapViewOfFile2(GetCurrentProcess(), view, MEM_PRESERVE_PLACEHOLDER) };
+            return false;
+        }
+        slice.section.mark_committed(slice.index, len / PAGE);
     }
     #[cfg(feature = "diagnostics")]
     remap_time(3, began);
@@ -1236,6 +1469,7 @@ fn unmap(physical: &mut Physical, base: usize, len: usize) {
         victory_gpu::titlemem::title_range_free(at);
         victory_gpu::title_memory_remapped(at, size);
         let taken = std::time::Instant::now();
+        let kernel = Kernel::begin(1);
         // SAFETY: a view we mapped; it becomes a placeholder again.
         unsafe {
             UnmapViewOfFile2(
@@ -1246,6 +1480,7 @@ fn unmap(physical: &mut Physical, base: usize, len: usize) {
                 MEM_PRESERVE_PLACEHOLDER,
             )
         };
+        drop(kernel);
         WORK[0].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         WORK[1].fetch_add(taken.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
         if at < base {
@@ -1876,6 +2111,53 @@ mod tests {
         assert!(page_window(&[a[0], b[0]], 0, PAGE).is_some());
         assert_eq!(XMemFreePhysicalPages(3, a.as_ptr()), 1);
         assert_eq!(XMemFreePhysicalPages(1, b.as_ptr()), 1);
+    }
+
+    /// (ours) A window and a write go through their section's standing view: a view of the
+    /// title's mapped before reads what was written, one mapped afterwards does too
+    /// (committed already, with no asking of its own), and pages nothing wrote stay
+    /// uncommitted.
+    #[test]
+    fn writes_go_through_the_sections_standing_view() {
+        use std::sync::atomic::Ordering::Acquire;
+        let pages = allocate(4);
+        let section = physical().pages.get(&pages[0]).map(|s| s.section.clone()).expect("a known page");
+        assert_eq!(section.1.base.load(Acquire), 0);
+        assert!(!section.committed(0, 1));
+        let kind = MEM_RESERVE | PAGES_64K;
+        let base = XMemVirtualAlloc(std::ptr::null_mut(), 8 * PAGE, kind, 3, PAGE_READWRITE);
+        assert!(!base.is_null());
+        // The title's view of the first page, mapped before the write.
+        assert_eq!(XMemMapPhysicalPages(base, 1, pages.as_ptr()), base);
+        assert!(section.committed(0, 1) && !section.committed(1, 1));
+        // A window over the middle of the first two pages.
+        let mut window = page_window(&pages, PAGE - 4, 8).expect("one run");
+        assert!(window._view.is_none(), "through the standing view");
+        window.bytes().copy_from_slice(b"standing");
+        drop(window);
+        let whole = section.1.base.load(Acquire);
+        assert!(whole != 0 && whole != REFUSED);
+        assert!(section.committed(0, 2) && !section.committed(2, 1));
+        // SAFETY: the first page is mapped read-write at `base`.
+        assert_eq!(unsafe { std::slice::from_raw_parts(base.cast::<u8>().add(PAGE - 4), 4) }, b"stan");
+        // The second page mapped now: committed by the window, and it reads what was written.
+        let second = base.wrapping_byte_add(4 * PAGE);
+        assert_eq!(XMemMapPhysicalPages(second, 1, &pages[1]), second);
+        assert_eq!(query(second).host.State, MEM_COMMIT);
+        // SAFETY: mapped read-write just now.
+        assert_eq!(unsafe { std::slice::from_raw_parts(second.cast::<u8>(), 4) }, b"ding");
+        // A write over several runs lands the same way, and the title's write is seen
+        // through the standing view.
+        assert!(write_physical(&[pages[3], pages[0]], PAGE - 2, b"abcd"));
+        assert_eq!(&page_bytes(pages[3])[PAGE - 2..], b"ab");
+        // SAFETY: as above.
+        assert_eq!(unsafe { std::slice::from_raw_parts(base.cast::<u8>(), 2) }, b"cd");
+        unsafe { base.cast::<u8>().add(7).write(0x77) };
+        // SAFETY: the standing view's first page, committed.
+        assert_eq!(unsafe { (whole as *const u8).add(7).read() }, 0x77);
+        assert!(!section.committed(2, 1));
+        XMemMapPhysicalPages(base, 8, std::ptr::null());
+        assert_eq!(XMemFreePhysicalPages(4, pages.as_ptr()), 1);
     }
 }
 
