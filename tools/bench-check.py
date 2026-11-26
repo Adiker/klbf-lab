@@ -1,0 +1,125 @@
+# Checks one KLBF Lab Bench BM-v1 result file and prints its row for docs/klbf/BAYSIDE-MORNING-V1.md.
+# Usage: python -I tools/bench-check.py KLBF-Bench-BM-v1-<serial>.json
+# Exit 0 and one table row when the result is acceptable; exit 1 and the problems otherwise.
+# Mirrors the game side (crates/victory-gpu/src/klbf_bench.rs): same fields, same verdict rules.
+# The serial itself hashes every frame time, which the JSON does not carry, so it can only be
+# checked for shape and against the file name and the share line, not recomputed.
+import json, math, re, sys
+from pathlib import Path
+
+TARGET_S = 300
+FIELDS = {
+    'bench': str, 'test': str, 'test_id': str, 'stamp': str, 'reason': str, 'stop': str, 'serial': str,
+    'date': str, 'project': str, 'project_source': str, 'sha': str, 'player': str, 'gpu': str,
+    'gpu_vram_gb': (int, float), 'cpu': str, 'ram_gb': (int, float), 'os': str, 'duration_s': (int, float),
+    'target_s': int, 'frames': int, 'fps': dict, 'pct_time_ge_12fps': (int, float),
+    'freezes_over_200ms': int, 'longest_frame_ms': (int, float), 'black_frames': int,
+    'device_removed': bool, 'inputs_blocked': int, 'share': str,
+}
+FPS = ('avg', 'median', 'low_1pct', 'low_5pct', 'min', 'max')
+# Quality settings the result may record (optional; shown in the Settings column when present).
+SETTINGS = (('profile', 'profile {}'), ('upscaler', '{}'), ('texture_cap_mb', 'textures ≤ {} MB'),
+            ('pipelines_skipped', '{} pipelines skipped'), ('pipelines_denied', '{} pipelines denied'),
+            ('draws_per_frame', '{} draws/frame'))
+LOGIN = re.compile(r'^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$')
+R2 = 0.005  # half a unit of the 2 decimals the game writes
+
+
+def check(d, name=None):
+    """Every problem with one parsed result; empty when it is acceptable."""
+    if not isinstance(d, dict):
+        return ['not a JSON object']
+    p = [f'{k}: missing or wrong type' for k, t in FIELDS.items()
+         if not isinstance(d.get(k), t) or (t is int and isinstance(d.get(k), bool))]
+    fps = d.get('fps') if isinstance(d.get('fps'), dict) else {}
+    p += [f'fps.{k}: missing or not a number' for k in FPS
+          if not isinstance(fps.get(k), (int, float)) or isinstance(fps.get(k), bool) or not math.isfinite(fps[k])]
+    if p:
+        return p
+    if (d['bench'], d['test'], d['test_id']) != ('KLBF Lab Bench', 'Bayside Morning v1', 'BM-v1'):
+        p.append('not a BM-v1 result')
+    # Duration: the full 5:00 from the first world frame.
+    if d['target_s'] != TARGET_S or d['duration_s'] < TARGET_S or d['stop'] != '5:00 reached':
+        p.append(f"duration {d['duration_s']} s / stop '{d['stop']}': the 5:00 run did not complete")
+    # Verdict, re-derived with the game's rules.
+    n, longest = d['frames'], d['longest_frame_ms']
+    if d['stamp'] != 'CERTIFIED':
+        p.append(f"stamp {d['stamp']}: only CERTIFIED results are listed")
+    if d['device_removed']:
+        p.append('device removed')
+    if n < 300:
+        p.append('fewer than 300 frames')
+    if d['black_frames'] * 100 > n:
+        p.append('black frames over 1 %')
+    if longest >= 10_000:
+        p.append('a stall of 10 s or more')
+    # Figures against each other.
+    a = fps
+    if a['avg'] <= R2 or longest <= 0:
+        return p + ['no frame rate']
+    total_hi, total_lo = n / (a['avg'] - R2), n / (a['avg'] + R2)  # seconds of frames
+    if total_hi < TARGET_S - 0.1 or total_lo > TARGET_S + longest / 1000 + 0.1:
+        p.append(f"frames / avg fps = {n / a['avg']:.1f} s, not the 5:00 measured")
+    if abs(1000 / longest - a['min']) > R2 + 1000 / (longest - 0.05) - 1000 / (longest + 0.05) + 0.01:
+        p.append('min fps does not match the longest frame')
+    order = [a['min'], a['low_1pct'], a['low_5pct'], a['avg'], a['max']]
+    if any(x > y + 2 * R2 for x, y in zip(order, order[1:])) or not a['min'] - 2 * R2 <= a['median'] <= a['max'] + 2 * R2:
+        p.append('fps figures out of order (min ≤ 1 % low ≤ 5 % low ≤ avg ≤ max, median within)')
+    pct = d['pct_time_ge_12fps']
+    if not 0 <= pct <= 100 or (longest < 1000 / 12 - 0.05 and pct < 100 - 2 * R2) or (a['max'] < 12 - R2 and pct > 2 * R2):
+        p.append('time ≥ 12 fps does not match the frame times')
+    fz = d['freezes_over_200ms']
+    if not 0 <= fz <= n or (fz > 0 and longest <= 200 - 0.05) or (fz == 0 and longest > 200 + 0.05):
+        p.append('freeze count does not match the longest frame')
+    # Serial: 8 hex, the same in the file name and the share line.
+    s = d['serial']
+    if not re.fullmatch(r'[0-9a-f]{8}', s):
+        p.append('serial is not 8 hex characters')
+    if name is not None and Path(name).name != f'KLBF-Bench-BM-v1-{s}.json':
+        p.append(f'file name does not match serial {s}')
+    if not d['share'].endswith(f"| {d['stamp']} | {s}") or f"{d['project']}@{d['sha']}" not in d['share']:
+        p.append('share line does not match the result')
+    return p
+
+
+def cell(v):
+    return str(v).replace('|', '\\|').replace('\n', ' ').strip()
+
+
+def settings(d):
+    return ' · '.join(f.format(cell(d[k])) for k, f in SETTINGS if d.get(k) not in (None, ''))
+
+
+def row(d, stem):
+    """The board row; stem is the result's path without extension, relative to the board page."""
+    player = cell(d['player']) or 'anonymous'
+    if player != 'anonymous' and LOGIN.match(player):
+        player = f'[{player}](https://github.com/{player})'
+    proj, sha = cell(d['project']), cell(d['sha'])
+    project = f'[{proj} @ {sha}](https://github.com/{proj}/tree/{sha})' if d['project_source'] == 'git' else f'{proj} @ {sha}'
+    a = d['fps']
+    return ' | '.join([
+        '', player, project, f"{cell(d['gpu'])} {d['gpu_vram_gb']:.0f} GB", cell(d['cpu']), f"{d['ram_gb']:.0f} GB",
+        f"{a['avg']:.1f}", f"{a['median']:.1f}", f"{a['low_1pct']:.1f}", f"{d['pct_time_ge_12fps']:.1f}",
+        settings(d), cell(d['date'])[:10], f'[JSON]({stem}.json) · [card]({stem}.png)', '']).strip()
+
+
+def main():
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+    if len(sys.argv) != 2:
+        sys.exit('usage: python -I tools/bench-check.py KLBF-Bench-BM-v1-<serial>.json')
+    path = Path(sys.argv[1])
+    try:
+        d = json.loads(path.read_text(encoding='utf-8-sig'))
+    except (OSError, ValueError) as e:
+        sys.exit(f'{path}: {e}')
+    problems = check(d, path.name)
+    if problems:
+        print('\n'.join(f'{path.name}: {x}' for x in problems), file=sys.stderr)
+        sys.exit(1)
+    print(row(d, f'bench/bm-v1/{path.stem}'))
+
+
+if __name__ == '__main__':
+    main()

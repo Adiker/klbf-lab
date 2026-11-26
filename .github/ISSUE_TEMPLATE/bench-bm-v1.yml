@@ -1,0 +1,47 @@
+name: "Bench result · Bayside Morning v1"
+description: Submit a KLBF Lab Bench BM-v1 result to appear on the results board.
+title: "[BM-v1] "
+labels: ["bench-bm-v1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Run the bench as described in [docs/klbf/BENCH-BM-V1.md](https://github.com/PastiiJay/klbf-lab/blob/main/docs/klbf/BENCH-BM-V1.md), then attach the files from `bench-results` next to the exe.
+        Only the card PNG, please: no screenshots of the game.
+  - type: input
+    id: nickname
+    attributes:
+      label: Nickname
+      description: Optional. Leave empty to appear as "anonymous".
+    validations:
+      required: false
+  - type: input
+    id: project
+    attributes:
+      label: Project repo URL
+      description: The repository your build came from.
+      placeholder: https://github.com/owner/repo
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result JSON
+      description: Paste the content of `KLBF-Bench-BM-v1-<serial>.json`, or drag the file here.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: card
+    attributes:
+      label: Card PNG
+      description: Drag `KLBF-Bench-BM-v1-<serial>.png` here.
+    validations:
+      required: true
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Agreement
+      options:
+        - label: I followed the procedure and agree to publish this result
+          required: true
