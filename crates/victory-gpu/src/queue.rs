@@ -1383,6 +1383,8 @@ fn present_now(named: Named) {
             crate::capture::dump_targets(frame);
         }
     }
+    #[allow(unused_mut)]
+    let mut black_frame = false;
     #[cfg(windows)]
     if let Some((resource, other)) = named
         && let resource = resource as This
@@ -1411,11 +1413,15 @@ fn present_now(named: Named) {
         crate::resource::host_transition(resource, state);
         #[cfg(feature = "diagnostics")]
         blinks(frame, resource, state, shown);
-        #[cfg(not(feature = "diagnostics"))]
-        let _ = shown;
+        black_frame = shown.unwrap_or(false);
     }
     #[cfg(not(windows))]
     let _ = named;
+    // (Vladimir-Human, PR #78) The bench: world frames, frame times, `VICTORY_BENCH_OUT`.
+    #[cfg(windows)]
+    crate::bench::on_present(crate::draw::drawn(), black_frame);
+    #[cfg(not(windows))]
+    crate::bench::on_present(0, black_frame);
 }
 /// Diagnostics: logs a presented frame that is black after one that was
 /// not, with what was presented and how many draws ran since.
