@@ -4,7 +4,7 @@
   <a href="https://github.com/PastiiJay/klbf-lab/tree/beta-2"><img src="https://img.shields.io/badge/real%20play-14.0%20fps%20avg%2C%2037%20min-2ea44f" alt="real play: 14.0 fps average over 37 minutes"></a>
   <img src="https://img.shields.io/badge/stable%20code%20on%20main-Lab%2035-1f46c8" alt="stable code on main: Lab 35">
   <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
-  <a href="https://github.com/PastiiJay/klbf-lab/tree/beta-2"><img src="https://img.shields.io/badge/new%20test%20build-Lab%2061%20(beta--2)-2ea44f" alt="new test build: Lab 61 on beta-2"></a>
+  <a href="https://github.com/PastiiJay/klbf-lab/tree/beta-2"><img src="https://img.shields.io/badge/new%20test%20build-Lab%2063%20(beta--2)-2ea44f" alt="new test build: Lab 63 on beta-2"></a>
   <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>
 </p>
 
@@ -17,11 +17,13 @@ This is the one version we recommend. It is meant for every graphics card; so fa
 > [!TIP]
 > **Playing on Linux / Proton?** Our Linux work is led by community member **[@zocram4cc](https://github.com/zocram4cc)**: see his Wine/Proton fixes ([#34](https://github.com/PastiiJay/klbf-lab/pull/34), [#35](https://github.com/PastiiJay/klbf-lab/pull/35)), the [Linux notes in the guide](docs/GUIDE.md#linux--proton-community-notes) and the RX 7800 XT report by [@Adiker](https://github.com/Adiker) ([#19](https://github.com/PastiiJay/klbf-lab/issues/19)). Post Linux results in an issue and tag @zocram4cc.
 
-## New test build: Lab 61 on [`beta-2`](https://github.com/PastiiJay/klbf-lab/tree/beta-2) (26 Nov 2026)
+## New test build: Lab 63 on [`beta-2`](https://github.com/PastiiJay/klbf-lab/tree/beta-2) (26 Nov 2026)
+
+> **🧪🌴 New: KLBF Lab Bench · Bayside Morning v1.** A 5-minute hands-off test from the same spot for everyone, input locked, with a certified postcard at the end. [How to run it](docs/klbf/BENCH-BM-V1.md) · [Results by hardware](docs/klbf/BAYSIDE-MORNING-V1.md). Lab 63 also fixes dark faces in shade and skips the intro movie on request.
 
 > **📏 A shared frame-rate standard.** Numbers between projects cannot be compared today (empty seas, menus, one lucky second). We propose one method for everyone: same starting save, same route, three tables (frame rate seen in the world, stability index, average performance index). **[Read the method](docs/klbf/MEASUREMENT.md)**, use it, and post your numbers.
 
-Lab 61, a new test build on the **[`beta-2` branch](https://github.com/PastiiJay/klbf-lab/tree/beta-2)**: correct faces and hair, many more frames per second, and a launcher (`play.ps1`). Measured in a real play session with a controller on an RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, following the shared method. No cherry-picked numbers: these come from ordinary play.
+Lab 61 (the build these figures were measured on), a test build on the **[`beta-2` branch](https://github.com/PastiiJay/klbf-lab/tree/beta-2)**: correct faces and hair, many more frames per second, and a launcher (`play.ps1`). Measured in a real play session with a controller on an RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, following the shared method. No cherry-picked numbers: these come from ordinary play.
 
 **Frame rate seen in the world** (peaks by situation)
 
