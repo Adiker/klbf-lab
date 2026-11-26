@@ -404,8 +404,6 @@ pub(crate) fn empty(list: &HostList, heap: &HostHeap) -> Option<Ready> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use victory_shader::bvh::{MISS, NONE, Ray, intersect};
 
     /// What [`super::empty`] rests on: in memory that reads as zeros no

@@ -307,7 +307,7 @@ pub(crate) fn target_format(format: u32) -> u32 {
         use windows::Win32::Graphics::Direct3D12::*;
         static REFUSED: std::sync::OnceLock<[bool; 3]> = std::sync::OnceLock::new();
         let refused = REFUSED.get_or_init(|| {
-            STAND_INS.map(|(f, to)| {
+            STAND_INS.map(|(f, _)| {
                 let Some(host) = crate::host::host() else {
                     return false;
                 };

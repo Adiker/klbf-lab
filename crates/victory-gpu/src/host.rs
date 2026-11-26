@@ -3024,6 +3024,7 @@ struct Flight {
 }
 
 /// One thing in the line of what waits for the card, in order.
+#[allow(clippy::large_enum_variant)]
 enum Late {
     Run(Flight),
     /// A bottom-of-pipe write of the flight before it: address, what, bytes.
@@ -8002,8 +8003,8 @@ fn rearm_guard(page: usize) {
     }
 }
 
-/// Copies `len` bytes from `src` to `dst` unless a source page is not
-/// readable.
+// Copies `len` bytes from `src` to `dst` unless a source page is not
+// readable.
 thread_local! {
     /// The source range of the plain copy this thread is in the middle of, and whether a page
     /// of it turned out not to be there ([`fast_copy`]).
@@ -8903,18 +8904,18 @@ impl Meter {
                     loop {
                         let next = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take();
                         newest = next.or(newest);
-                        if let Some((hwnd, text)) = &newest {
-                            if *text != shown {
-                                let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
-                                // SAFETY: a window handle and a NUL-terminated text.
-                                unsafe {
-                                    let _ = SetWindowTextW(
-                                        HWND(*hwnd as *mut _),
-                                        PCWSTR(wide.as_ptr()),
-                                    );
-                                }
-                                shown.clone_from(text);
+                        if let Some((hwnd, text)) = &newest
+                            && *text != shown
+                        {
+                            let wide: Vec<u16> = text.encode_utf16().chain([0]).collect();
+                            // SAFETY: a window handle and a NUL-terminated text.
+                            unsafe {
+                                let _ = SetWindowTextW(
+                                    HWND(*hwnd as *mut _),
+                                    PCWSTR(wide.as_ptr()),
+                                );
                             }
+                            shown.clone_from(text);
                         }
                         std::thread::sleep(Duration::from_millis(100));
                     }

@@ -214,6 +214,7 @@ unsafe impl Sync for SdkPath {}
 #[cfg(all(windows, feature = "diagnostics"))]
 #[unsafe(no_mangle)]
 #[used]
+#[allow(clippy::manual_c_str_literals)] // exported as bytes, not as a `c_char` string
 pub static D3D12SDKPath: SdkPath = SdkPath(b".\\D3D12\\\0".as_ptr());
 
 fn main() -> Result<()> {

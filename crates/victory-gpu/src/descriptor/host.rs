@@ -4385,11 +4385,16 @@ void BY_FLOATS_OR_NOT(uint3 id : SV_DispatchThreadID) {
         let mut spans = Spans::default();
         // A 512x512 texture of 0x56000 bytes viewed from levels 3 and 1,
         // and the next one 0x6000 after it (run 188).
-        spans.note(1, 0x1_0000, 0x1_0000 + 0x5_6000, true);
+        let first = (0x1_0000, 0x1_0000 + 0x5_6000);
+        spans.note(1, first.0, first.1, &shape(first.0, first.1), true);
         spans.shows(1, 3);
-        spans.note(2, 0x1_0000, 0x1_0000 + 0x5_6000, true);
+        spans.note(2, first.0, first.1, &shape(first.0, first.1), true);
         spans.shows(2, 1);
-        spans.note(3, 0x1_6000, 0x1_6000 + 0x5_6000, true);
+        // The neighbour is put in place as it is: `note` now forgets the
+        // spans a newer view overlaps.
+        let next = (0x1_6000, 0x1_6000 + 0x5_6000);
+        spans.spans.insert(next, (shape(next.0, next.1), [3].into()));
+        spans.by_slot.insert(3, next);
         assert_eq!(spans.next_start(0x1_0000, 0x1_0000 + 0x5_6000), Some(0x1_6000));
         assert_eq!(spans.next_start(0x1_6000, 0x1_6000 + 0x5_6000), None);
         assert_eq!(spans.first_viewed(0x1_0000), Some(1));
