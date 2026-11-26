@@ -13,6 +13,8 @@ KLBF Lab is a test build of a compatibility layer that runs an Xbox Series title
 
 No cherry-picked numbers: these come from ordinary play, not from a quiet scene chosen to look good (scenes with only open water run higher). Measured during a real play session (controller), RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, the settings of [`play.ps1`](play.ps1):
 
+We propose a shared way to measure, so that every project can compare on equal footing: [docs/klbf/MEASUREMENT.md](docs/klbf/MEASUREMENT.md). The numbers below follow it.
+
 **Frame rate seen in the world** (peaks by situation)
 
 | Situation | fps |
