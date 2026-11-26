@@ -86,6 +86,8 @@ powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title -Pre
 powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title   # play
 ```
 
+**First run in 3 steps:** 1) point `play.ps1` at the folder with the game's main `.exe` (`-GameDir <folder>`, default `C:\Games\Title`); 2) `-Prebuild` once per new version, no manual commands; 3) play. Questions (game folder, `victory.toml`, driver crashes during the pre-build, low memory, logs): [Common questions](docs/GUIDE.md#common-questions).
+
 `-SeriesX` plays in Series X mode (no FSR needed, slower). `-SkipMovies end` skips the opening movies (`open` and `fast` are other ways to do it). Textures are capped at 1024 px by default; `-LowMemory` caps them at 512 px: fewer freezes when memory is full, softer textures. `-FfxDir` points at another FSR folder. Plug the controller in before starting.
 
 ### First start (Windows 10 and 11)

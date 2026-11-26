@@ -6,6 +6,11 @@ In this guide the game files are in **`C:\Games\Title`** (the folder that holds 
 
 Open **PowerShell** (Start menu → type `PowerShell` → Enter) and paste each block. Wait for one block to finish before the next.
 
+**First run in 3 steps** (once the tools are built, steps 1–5):
+1. Tell `play.ps1` where the game is: `-GameDir <folder>` (see [Common questions](#common-questions)).
+2. Run `.\play.ps1 -GameDir <folder> -Prebuild` once. Wait for `Pre-build done`.
+3. Run `.\play.ps1 -GameDir <folder>` to play.
+
 ---
 
 ## 1. Check your PC (1 minute)
@@ -87,6 +92,44 @@ Then step 6 again, and step 7.
 | Crash while loading after `dstorage: request failed: zlib … hr=0x8007000d` | Some game files are incomplete or damaged: copy the game folder again from your source (thanks @Emaxoso) |
 
 Still stuck? Open an [issue](https://github.com/PastiiJay/klbf-lab/issues) with your graphics card, driver version, Windows version and the last lines PowerShell printed. Text only, no game screenshots.
+
+## Common questions
+
+**Which folder is the game folder? Is my `victory.toml` okay?**
+The game folder is the one that holds the game's main `.exe` and `shaders.rpf`. `play.ps1` takes the largest `.exe` in it (or the one you give with `-Exe`).
+With `play.ps1`, pass it with `-GameDir <folder>`. Without `-GameDir`, `play.ps1` uses `C:\Games\Title`. It sets that folder itself, so `game_dir` in `victory.toml` is not used by `play.ps1`. `victory.toml` only matters when you run `victory.exe` yourself.
+In `victory.toml`, `cache_dir` and `data_dir` can stay commented: the defaults (`%LOCALAPPDATA%\victory\cache` and `%LOCALAPPDATA%\victory\data`) are fine. Every path must be outside the `klbf-lab` folder: the tools refuse paths inside it.
+
+**`--jobs 12` or `--jobs 8`? Do I need `SHADER_OPT=0` or `skip-amd.txt`?**
+No manual commands are needed. Just run `.\play.ps1 -Prebuild` once per new version. It sets the jobs, the skip list and every setting itself.
+
+**Do I need `-Prebuild` before every launch?**
+No. Once per new version (after `git pull` and `cargo build --release`). Use the same options for `-Prebuild` and for play (for example `-SeriesX` or `-LowMemory` in both): the shader cache depends on them.
+
+**`-Prebuild` keeps printing `Pass N ended with code -1073741819 (driver crash?): resuming...`**
+That is normal. The graphics driver crashed on one shader. The next pass makes the suspects alone, finds the one that crashed and skips it from then on (listed in `prebuild-crashed.txt`). It resumes by itself, up to 120 passes. Let it finish.
+
+**Every pass ends with code 3 (Linux / Proton).**
+We don't know the cause yet. Open an [issue](https://github.com/PastiiJay/klbf-lab/issues) with the full console of one pass (see below).
+
+**Does it run on an integrated GPU (Radeon 780M and similar)?**
+Untested. It needs a lot of dedicated video memory (more than 8 GB recommended), so expect problems.
+
+**I have an 8 GB card or 16 GB of RAM.**
+Add `-LowMemory` (textures capped at 512 px instead of 1024) to both `-Prebuild` and play. With 16 GB of RAM, also set a page file of 32 GB or more (step 2).
+
+**Where is the crash log? Where are the bench results?**
+- Crash log: `%LOCALAPPDATA%\victory\data\<title ID>\crashes.log` (the 8-character folder in `%LOCALAPPDATA%\victory\data`). If you set `data_dir`, it is there instead.
+- Bench results: the `bench-results` folder next to `victory.exe`, so `target\release\bench-results` (or the folder in `KLBF_BENCH_DIR`).
+
+**How do I share the console?**
+Add `*>&1 | Tee-Object run.log` at the end of the command:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title *>&1 | Tee-Object run.log
+```
+
+Then attach `run.log` to a GitHub [issue](https://github.com/PastiiJay/klbf-lab/issues).
 
 ---
 
