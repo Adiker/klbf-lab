@@ -174,43 +174,6 @@ impl GraphicsState {
         }
     }
 
-    /// Everything the state holds, as text: part of a pipeline's name in
-    /// the library and of the key a title pipeline is started early by.
-    pub(crate) fn describe(&self) -> String {
-        self.describe_with_blend(&self.blend)
-    }
-
-    fn describe_with_blend(&self, blend: &D3D12_BLEND_DESC) -> String {
-        let inputs: Vec<String> = self
-            .inputs
-            .iter()
-            .zip(&self.names)
-            .map(|(e, name)| {
-                format!(
-                    "{name:?} {} {} {} {} {} {}",
-                    e.SemanticIndex, e.Format.0, e.InputSlot, e.AlignedByteOffset, e.InputSlotClass.0, e.InstanceDataStepRate
-                )
-            })
-            .collect();
-        let bounds = if self.depth_bounds {
-            " depth-bounds"
-        } else {
-            ""
-        };
-        format!(
-            "{:?} {} {:?} {:?}{bounds} {inputs:?} {} {} {:?} {} {:?}",
-            blend,
-            self.sample_mask,
-            self.rasterizer,
-            self.depth,
-            self.strip_cut.0,
-            self.topology.0,
-            self.targets,
-            self.depth_format.0,
-            self.samples
-        )
-    }
-
     /// D3D12 refuses blending on writable integer color targets. A title
     /// can give a mixed set of targets the same blend state through slot 0.
     fn host_blend(&self) -> D3D12_BLEND_DESC {
@@ -247,6 +210,43 @@ impl GraphicsState {
             blend.RenderTarget[slot].BlendEnable = false.into();
         }
         blend
+    }
+
+    /// Everything the state holds, as text: part of a pipeline's name in
+    /// the library and of the key a title pipeline is started early by.
+    pub(crate) fn describe(&self) -> String {
+        self.describe_with_blend(&self.blend)
+    }
+
+    fn describe_with_blend(&self, blend: &D3D12_BLEND_DESC) -> String {
+        let inputs: Vec<String> = self
+            .inputs
+            .iter()
+            .zip(&self.names)
+            .map(|(e, name)| {
+                format!(
+                    "{name:?} {} {} {} {} {} {}",
+                    e.SemanticIndex, e.Format.0, e.InputSlot, e.AlignedByteOffset, e.InputSlotClass.0, e.InstanceDataStepRate
+                )
+            })
+            .collect();
+        let bounds = if self.depth_bounds {
+            " depth-bounds"
+        } else {
+            ""
+        };
+        format!(
+            "{:?} {} {:?} {:?}{bounds} {inputs:?} {} {} {:?} {} {:?}",
+            blend,
+            self.sample_mask,
+            self.rasterizer,
+            self.depth,
+            self.strip_cut.0,
+            self.topology.0,
+            self.targets,
+            self.depth_format.0,
+            self.samples
+        )
     }
 
     fn depth1(&self) -> D3D12_DEPTH_STENCIL_DESC1 {
