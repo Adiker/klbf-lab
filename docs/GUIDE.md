@@ -62,7 +62,7 @@ cd $HOME\klbf-lab
 powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title
 ```
 
-- **Plug in the controller before starting.**
+- **Plug in the controller before starting.** The account picker only answers the controller, not the keyboard ([#69](https://github.com/PastiiJay/klbf-lab/issues/69)).
 - No FSR? Add `-SeriesX` (slower). Run step 6 again with `-SeriesX` too.
 - The first minutes in a new area are slow while shaders finish loading.
 
