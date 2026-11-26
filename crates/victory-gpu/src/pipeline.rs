@@ -683,16 +683,34 @@ fn parse_skip_hashes(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// The shader hashes `VICTORY_SKIP_PIPELINES` names (or the built-in one).
 #[cfg(windows)]
-fn skipped_shader(shaders: &[Arc<Shader>]) -> Option<&str> {
+fn skip_hashes() -> &'static [String] {
     static HASHES: OnceLock<Vec<String>> = OnceLock::new();
-    let hashes = HASHES.get_or_init(|| {
+    HASHES.get_or_init(|| {
         // ponytail: built-in list of shaders whose host-driver compile never ends on AMD RDNA4
         // (driver memory grows ~240 MB/s while it runs); set VICTORY_SKIP_PIPELINES to override.
         let value = std::env::var("VICTORY_SKIP_PIPELINES")
             .unwrap_or_else(|_| "39f0e9aeb156a61c".to_owned());
         parse_skip_hashes(&value)
-    });
+    })
+}
+
+/// Pipelines skipped on purpose: shaders on the skip list plus pre-build driver crashes.
+#[cfg(windows)]
+pub(crate) fn skipped_count() -> u64 {
+    (skip_hashes().len() + library::crashed_count()) as u64
+}
+
+/// Host pipelines the driver refused (or whose shaders did not translate) so far.
+#[cfg(windows)]
+pub(crate) fn denied_count() -> u64 {
+    make::DENIED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(windows)]
+fn skipped_shader(shaders: &[Arc<Shader>]) -> Option<&str> {
+    let hashes = skip_hashes();
     if hashes.is_empty() {
         return None;
     }

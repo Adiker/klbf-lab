@@ -141,8 +141,13 @@ impl Pending {
 
     fn make(&self) {
         let _ = self.begun.set(Instant::now());
-        self.made
-            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
+        self.made.get_or_init(|| {
+            let made = HostPipeline::new(&self.shaders, self.graphics.as_deref());
+            if made.is_none() {
+                DENIED.fetch_add(1, Ordering::Relaxed);
+            }
+            made
+        });
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
@@ -261,6 +266,9 @@ fn held_too_long(held: Duration, compute: bool, base: Duration) -> bool {
 
 /// Pipelines queued and not made yet.
 static WAITING: AtomicU64 = AtomicU64::new(0);
+
+/// Host pipelines that came out `None` (refused by the driver, or a shader that does not translate).
+pub(crate) static DENIED: AtomicU64 = AtomicU64::new(0);
 
 /// Pipelines queued and not made yet (for the frame line).
 pub(crate) fn waiting() -> u64 {

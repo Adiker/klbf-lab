@@ -14,6 +14,7 @@
 //! The card is shown the way Neptune's overlay shows its panel: a premultiplied [`Bitmap`] in a
 //! click-through, topmost layered window (`UpdateLayeredWindow`), GDI as the glyph rasteriser.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, OnceLock};
@@ -74,11 +75,11 @@ struct Run {
     /// Frame times since the start, ms.
     ms: Vec<f64>,
     black: u64,
-    /// Shaders translated and pipelines made, at the start.
-    base: [u64; 2],
+    /// [`counters`] at the start.
+    base: [u64; 4],
 }
 
-static RUN_STATE: Mutex<Run> = Mutex::new(Run { phase: Phase::Waiting, last: None, ms: Vec::new(), black: 0, base: [0; 2] });
+static RUN_STATE: Mutex<Run> = Mutex::new(Run { phase: Phase::Waiting, last: None, ms: Vec::new(), black: 0, base: [0; 4] });
 /// Presses the lock kept from the game.
 static BLOCKED: AtomicU64 = AtomicU64::new(0);
 static CARD: OnceLock<(Card, Instant)> = OnceLock::new();
@@ -90,8 +91,9 @@ fn run() -> std::sync::MutexGuard<'static, Run> {
     RUN_STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn counters() -> [u64; 2] {
-    [crate::shader_cache::counts().1, crate::pipeline::pipeline_counts().0]
+/// Shaders translated, pipelines made, draws run, draws asked for (run or dropped), so far.
+fn counters() -> [u64; 4] {
+    [crate::shader_cache::counts().1, crate::pipeline::pipeline_counts().0, crate::draw::drawn(), crate::draw::attempted()]
 }
 
 /// How the run ends after the card (the title's own end: suspend, save the pipeline cache, exit).
@@ -156,10 +158,28 @@ struct Summary {
     longest_ms: f64,
 }
 
+/// The frame rate of each run of consecutive frames lasting at least 1 s (frames / their time), in
+/// order; the trailing run shorter than 1 s is left out.
+fn window_fps(ms: &[f64]) -> Vec<f64> {
+    let (mut out, mut sum, mut n) = (Vec::new(), 0.0, 0usize);
+    for &m in ms {
+        sum += m;
+        n += 1;
+        if sum >= 1000.0 {
+            out.push(n as f64 * 1000.0 / sum);
+            (sum, n) = (0.0, 0);
+        }
+    }
+    out
+}
+
+/// `ms` in order. Min and max are the lowest and highest 1-second window ([`window_fps`]; the
+/// average when the run is shorter); the lows are per frame.
 fn summarize(ms: &[f64]) -> Summary {
     if ms.is_empty() {
         return Summary::default();
     }
+    let windows = window_fps(ms);
     let mut sorted = ms.to_vec();
     sorted.sort_by(f64::total_cmp);
     let n = sorted.len();
@@ -173,8 +193,8 @@ fn summarize(ms: &[f64]) -> Summary {
         median: fps(median),
         low1: crate::bench::low_pct_fps(&sorted, 0.01),
         low5: crate::bench::low_pct_fps(&sorted, 0.05),
-        min: fps(sorted[n - 1]),
-        max: fps(sorted[0]),
+        min: windows.iter().copied().reduce(f64::min).unwrap_or_else(|| fps(total / n as f64)),
+        max: windows.iter().copied().reduce(f64::max).unwrap_or_else(|| fps(total / n as f64)),
         pct12: if total > 0.0 { fast * 100.0 / total } else { 0.0 },
         freezes: sorted.iter().filter(|&&m| m > FREEZE_MS).count(),
         longest_ms: sorted[n - 1],
@@ -255,6 +275,47 @@ impl Sys {
     }
 }
 
+/// The settings the run was measured with, from the counters the runtime keeps.
+#[derive(Clone, Default, Debug)]
+struct Settings {
+    /// "S" or "X".
+    profile: &'static str,
+    /// "FSR" (`VICTORY_FSR_DLL` set) or "none".
+    upscaler: &'static str,
+    /// `VICTORY_TEXTURE_MAX_DIM` in effect, px; 0: no cap.
+    texture_max_dim: u64,
+    /// Pipelines on the skip list (`VICTORY_SKIP_PIPELINES`) plus pre-build driver crashes.
+    skipped: u64,
+    /// Host pipelines refused by the driver or whose shaders did not translate.
+    denied: u64,
+    draws_per_frame: f64,
+    /// Draws and mesh dispatches asked for during the run and not run on the host.
+    dropped_pct: f64,
+}
+
+impl Settings {
+    /// `drawn` and `asked`: draws run and asked for during the run's `frames`.
+    fn read(frames: usize, drawn: u64, asked: u64) -> Settings {
+        Settings {
+            profile: if crate::console::current() == crate::console::Console::SeriesS { "S" } else { "X" },
+            upscaler: if std::env::var_os("VICTORY_FSR_DLL").is_some_and(|v| !v.is_empty()) { "FSR" } else { "none" },
+            texture_max_dim: crate::resource::texture_max_dim().unwrap_or(0),
+            skipped: crate::pipeline::skipped_count(),
+            denied: crate::pipeline::denied_count(),
+            draws_per_frame: if frames > 0 { drawn as f64 / frames as f64 } else { 0.0 },
+            dropped_pct: if asked > 0 { asked.saturating_sub(drawn) as f64 * 100.0 / asked as f64 } else { 0.0 },
+        }
+    }
+
+    fn line(&self) -> String {
+        let textures = if self.texture_max_dim > 0 { format!("textures \u{2264} {} px", self.texture_max_dim) } else { "textures uncapped".into() };
+        format!(
+            "profile {} \u{b7} {} \u{b7} {textures} \u{b7} {:.0} draws/frame \u{b7} {:.1} % dropped \u{b7} {} skipped \u{b7} {} denied",
+            self.profile, self.upscaler, self.draws_per_frame, self.dropped_pct, self.skipped, self.denied
+        )
+    }
+}
+
 struct Card {
     stamp: Stamp,
     reason: String,
@@ -266,6 +327,7 @@ struct Card {
     elapsed: Duration,
     s: Summary,
     sys: Sys,
+    set: Settings,
     from: String,
     player: String,
     blocked: u64,
@@ -295,6 +357,7 @@ fn finish(early: Option<&'static str>) {
     let s = summarize(&ms);
     let (stamp, reason) = verdict(early.is_some(), elapsed.min(RUN), &s, black, removed);
     let now = counters();
+    let set = Settings::read(s.frames, now[2].saturating_sub(base[2]), now[3].saturating_sub(base[3]));
     let t = local_time();
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let month = MONTHS[usize::from(t.wMonth.clamp(1, 12)) - 1];
@@ -309,29 +372,13 @@ fn finish(early: Option<&'static str>) {
         elapsed: elapsed.min(RUN),
         s,
         sys: SYS.get().cloned().unwrap_or_default(),
+        set,
         from: format!("{PROJECT} @ {SHA}{declared}"),
         player: player(),
         blocked: BLOCKED.load(Ordering::Relaxed),
         share: String::new(),
         png_name: String::new(),
     };
-    // The serial: the first 8 hex of a hash of every frame time and the result's fields.
-    let mut h = blake3::Hasher::new();
-    for m in &ms {
-        h.update(&m.to_le_bytes());
-    }
-    h.update(format!("{}|{}|{}|{}|{:?}", card.date_iso, card.from, card.sys.line(), card.reason, card.s).as_bytes());
-    card.serial = h.finalize().to_hex().as_str()[..8].to_string();
-    card.share = format!(
-        "[KLBF Lab Bench {ID}] {PROJECT}@{SHA} | {} | {} | avg {:.1} fps, 1% low {:.1} | {} | {}",
-        short_gpu(&card.sys.gpu),
-        short_cpu(&card.sys.cpu),
-        s.avg,
-        s.low1,
-        stamp.word(),
-        card.serial
-    );
-    card.png_name = format!("bench-results\\KLBF-Bench-{ID}-{}.png", card.serial);
     // Memory at the end only: nothing is sampled during the run.
     let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
     let adapter = ADAPTER.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -348,7 +395,23 @@ fn finish(early: Option<&'static str>) {
         ram: crate::host::bench_process_memory().1,
         why: early.unwrap_or("5:00 reached"),
     };
-    write_results(&card, &extra);
+    let mut doc = result_json(&card, &extra, &window_fps(&ms));
+    card.serial = serial(&doc);
+    card.share = format!(
+        "[KLBF Lab Bench {ID}] {PROJECT}@{SHA} | {} | {} | avg {:.1} fps, 1% low {:.1} | {} | {}",
+        short_gpu(&card.sys.gpu),
+        short_cpu(&card.sys.cpu),
+        s.avg,
+        s.low1,
+        stamp.word(),
+        card.serial
+    );
+    card.png_name = format!("bench-results\\KLBF-Bench-{ID}-{}.png", card.serial);
+    if let J::O(m) = &mut doc {
+        m.insert("serial", J::S(card.serial.clone()));
+        m.insert("share", J::S(card.share.clone()));
+    }
+    write_results(&card, &extra, &doc.canonical());
     let _ = CARD.set((card, Instant::now()));
 }
 
@@ -379,60 +442,209 @@ fn results_dir() -> Option<PathBuf> {
 
 const MB: f64 = 1024.0 * 1024.0;
 
-fn write_results(c: &Card, x: &Extra) {
+/// A JSON value, written in canonical form ([`J::canonical`]).
+enum J {
+    Null,
+    B(bool),
+    I(u64),
+    /// Written rounded to 2 decimals.
+    F(f64),
+    S(String),
+    A(Vec<J>),
+    O(BTreeMap<&'static str, J>),
+}
+
+impl J {
+    fn obj<const N: usize>(fields: [(&'static str, J); N]) -> J {
+        J::O(fields.into_iter().collect())
+    }
+
+    /// The text Python's `json.dumps(v, sort_keys=True, separators=(',', ':'), ensure_ascii=False)`
+    /// gives for this value read back with `json.loads`: keys sorted, no spaces, non-ASCII as is,
+    /// the same escapes, floats in shortest round-trip form (`{:?}` and Python's `repr` agree on
+    /// 2-decimal values from 0.01 up to 1e16).
+    fn canonical(&self) -> String {
+        let mut out = String::new();
+        self.write(&mut out);
+        out
+    }
+
+    fn write(&self, out: &mut String) {
+        match self {
+            J::Null => out.push_str("null"),
+            J::B(b) => out.push_str(if *b { "true" } else { "false" }),
+            J::I(n) => out.push_str(&n.to_string()),
+            J::F(x) => {
+                let r = if x.is_finite() { (x * 100.0).round() / 100.0 } else { 0.0 };
+                // `+ 0.0` turns -0.0 into 0.0.
+                out.push_str(&format!("{:?}", r + 0.0));
+            }
+            J::S(s) => {
+                out.push('"');
+                for c in s.chars() {
+                    match c {
+                        '"' => out.push_str("\\\""),
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        '\u{8}' => out.push_str("\\b"),
+                        '\u{c}' => out.push_str("\\f"),
+                        c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                        c => out.push(c),
+                    }
+                }
+                out.push('"');
+            }
+            J::A(v) => {
+                out.push('[');
+                for (i, x) in v.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    x.write(out);
+                }
+                out.push(']');
+            }
+            J::O(m) => {
+                out.push('{');
+                for (i, (k, x)) in m.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    J::S((*k).to_string()).write(out);
+                    out.push(':');
+                    x.write(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+/// The serial (schema 1): the first 8 hex characters of SHA-256 over the UTF-8 bytes of the result
+/// JSON in canonical form ([`J::canonical`]) without its "serial" and "share" fields (the share
+/// line carries the serial). The check, in Python:
+/// `d.pop('serial'); d.pop('share'); hashlib.sha256(json.dumps(d, sort_keys=True,
+/// separators=(',', ':'), ensure_ascii=False).encode('utf-8')).hexdigest()[:8]`.
+fn serial(doc: &J) -> String {
+    sha256(doc.canonical().as_bytes()).iter().take(4).map(|b| format!("{b:02x}")).collect()
+}
+
+/// SHA-256 (FIPS 180-4): the checker has Python's standard library only, so not blake3.
+fn sha256(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
+        0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
+        0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85,
+        0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+        0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut msg = data.to_vec();
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&(data.len() as u64 * 8).to_be_bytes());
+    for block in msg.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (i, word) in block.chunks_exact(4).enumerate() {
+            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let mut v = h;
+        for (k, wi) in K.iter().zip(w) {
+            let [a, b, c, d, e, f, g, hh] = v;
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let t1 = hh.wrapping_add(s1).wrapping_add((e & f) ^ (!e & g)).wrapping_add(*k).wrapping_add(wi);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let t2 = s0.wrapping_add((a & b) ^ (a & c) ^ (b & c));
+            v = [t1.wrapping_add(t2), a, b, c, d.wrapping_add(t1), e, f, g];
+        }
+        for (x, y) in h.iter_mut().zip(v) {
+            *x = x.wrapping_add(y);
+        }
+    }
+    let mut out = [0u8; 32];
+    for (o, x) in out.chunks_exact_mut(4).zip(h) {
+        o.copy_from_slice(&x.to_be_bytes());
+    }
+    out
+}
+
+/// The result without "serial" and "share" (schema 1).
+fn result_json(c: &Card, x: &Extra, per_second: &[f64]) -> J {
     let s = &c.s;
-    let e = crate::bench::escape_json;
-    let json = format!(
-        concat!(
-            "{{\n",
-            "  \"bench\": \"KLBF Lab Bench\",\n  \"test\": \"Bayside Morning v1\",\n  \"test_id\": \"{}\",\n",
-            "  \"stamp\": \"{}\",\n  \"reason\": \"{}\",\n  \"stop\": \"{}\",\n  \"serial\": \"{}\",\n  \"date\": \"{}\",\n",
-            "  \"project\": \"{}\",\n  \"project_source\": \"{}\",\n  \"sha\": \"{}\",\n  \"player\": \"{}\",\n",
-            "  \"gpu\": \"{}\",\n  \"gpu_vram_gb\": {:.1},\n  \"cpu\": \"{}\",\n  \"ram_gb\": {:.1},\n  \"os\": \"{}\",\n",
-            "  \"duration_s\": {:.1},\n  \"target_s\": 300,\n  \"frames\": {},\n",
-            "  \"fps\": {{ \"avg\": {:.2}, \"median\": {:.2}, \"low_1pct\": {:.2}, \"low_5pct\": {:.2}, \"min\": {:.2}, \"max\": {:.2} }},\n",
-            "  \"pct_time_ge_12fps\": {:.2},\n  \"freezes_over_200ms\": {},\n  \"longest_frame_ms\": {:.1},\n",
-            "  \"black_frames\": {},\n  \"device_removed\": {},\n  \"inputs_blocked\": {},\n",
-            "  \"shaders_translated\": {},\n  \"pipelines_compiled\": {},\n",
-            "  \"vram_end_mb\": {:.0},\n  \"vram_budget_mb\": {:.0},\n  \"ram_end_mb\": {:.0},\n",
-            "  \"share\": \"{}\"\n}}\n"
+    let t = &c.set;
+    J::obj([
+        ("bench", J::S("KLBF Lab Bench".into())),
+        ("test", J::S("Bayside Morning v1".into())),
+        ("test_id", J::S(ID.into())),
+        ("schema", J::I(1)),
+        ("stamp", J::S(c.stamp.word().into())),
+        ("reason", J::S(c.reason.clone())),
+        ("stop", J::S(x.why.into())),
+        ("date", J::S(c.date_iso.clone())),
+        ("project", J::S(PROJECT.into())),
+        ("project_source", J::S(PROJECT_SOURCE.into())),
+        ("sha", J::S(SHA.into())),
+        ("player", J::S(c.player.clone())),
+        ("gpu", J::S(c.sys.gpu.clone())),
+        ("gpu_vram_gb", J::F(c.sys.vram_gb)),
+        ("cpu", J::S(c.sys.cpu.clone())),
+        ("ram_gb", J::F(c.sys.ram_gb)),
+        ("os", J::S(c.sys.os.clone())),
+        ("duration_s", J::F(c.elapsed.as_secs_f64())),
+        ("target_s", J::I(RUN.as_secs())),
+        ("frames", J::I(s.frames as u64)),
+        (
+            "fps",
+            J::obj([
+                ("avg", J::F(s.avg)),
+                ("median", J::F(s.median)),
+                ("low_1pct", J::F(s.low1)),
+                ("low_5pct", J::F(s.low5)),
+                ("min", J::F(s.min)),
+                ("max", J::F(s.max)),
+            ]),
         ),
-        ID,
-        c.stamp.word(),
-        e(&c.reason),
-        e(x.why),
-        c.serial,
-        c.date_iso,
-        e(PROJECT),
-        PROJECT_SOURCE,
-        e(SHA),
-        e(&c.player),
-        e(&c.sys.gpu),
-        c.sys.vram_gb,
-        e(&c.sys.cpu),
-        c.sys.ram_gb,
-        e(&c.sys.os),
-        c.elapsed.as_secs_f64(),
-        s.frames,
-        s.avg,
-        s.median,
-        s.low1,
-        s.low5,
-        s.min,
-        s.max,
-        s.pct12,
-        s.freezes,
-        s.longest_ms,
-        x.black,
-        x.removed,
-        c.blocked,
-        x.compiled[0],
-        x.compiled[1],
-        x.vram.0 as f64 / MB,
-        x.vram.1 as f64 / MB,
-        x.ram as f64 / MB,
-        e(&c.share),
-    );
+        // The frame rate of each 1-second window, in order: what min and max are taken from.
+        ("fps_per_second", J::A(per_second.iter().map(|&f| J::F(f)).collect())),
+        ("pct_time_ge_12fps", J::F(s.pct12)),
+        ("freezes_over_200ms", J::I(s.freezes as u64)),
+        ("longest_frame_ms", J::F(s.longest_ms)),
+        ("black_frames", J::I(x.black)),
+        ("device_removed", J::B(x.removed)),
+        ("inputs_blocked", J::I(c.blocked)),
+        ("shaders_translated", J::I(x.compiled[0])),
+        ("pipelines_compiled", J::I(x.compiled[1])),
+        ("vram_end_mb", J::F(x.vram.0 as f64 / MB)),
+        ("vram_budget_mb", J::F(x.vram.1 as f64 / MB)),
+        ("ram_end_mb", J::F(x.ram as f64 / MB)),
+        (
+            "settings",
+            J::obj([
+                ("profile", J::S(t.profile.into())),
+                ("upscaler", J::S(t.upscaler.into())),
+                // A size in px, not MB: the runtime caps textures by their largest side (null: no cap).
+                ("texture_max_dim", if t.texture_max_dim > 0 { J::I(t.texture_max_dim) } else { J::Null }),
+                ("pipelines_skipped", J::I(t.skipped)),
+                ("pipelines_denied", J::I(t.denied)),
+                ("draws_per_frame", J::F(t.draws_per_frame)),
+                ("dropped_draws_pct", J::F(t.dropped_pct)),
+            ]),
+        ),
+    ])
+}
+
+fn write_results(c: &Card, x: &Extra, json: &str) {
+    let s = &c.s;
     let text = [
         "KLBF Lab Bench \u{b7} Bayside Morning v1 (BM-v1)".to_string(),
         format!("Result:     {} \u{2013} {}", c.stamp.word(), c.reason),
@@ -440,9 +652,10 @@ fn write_results(c: &Card, x: &Extra) {
         format!("Date:       {}", c.date_iso),
         format!("From:       {} \u{b7} player: {}", c.from, c.player),
         format!("Machine:    {}", c.sys.line()),
+        format!("Settings:   {}", c.set.line()),
         format!("Duration:   {} / 5:00 ({})", mmss(c.elapsed), x.why),
         format!(
-            "FPS:        avg {:.1} \u{b7} median {:.1} \u{b7} 1% low {:.1} \u{b7} 5% low {:.1} \u{b7} min {:.1} \u{b7} max {:.1}",
+            "FPS:        avg {:.1} \u{b7} median {:.1} \u{b7} 1% low {:.1} \u{b7} 5% low {:.1} \u{b7} min {:.1} \u{b7} max {:.1} (1 s windows)",
             s.avg, s.median, s.low1, s.low5, s.min, s.max
         ),
         format!("Time >= 12 fps: {:.1} %", s.pct12),
@@ -1158,6 +1371,9 @@ fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
         y += 20.0;
         pen.text(ARIAL_BOLD, 14.0, line, 535.0, y, false, 425.0, ink);
     }
+    // The settings on one line (shrunk to fit); the share line gives up its third line for it.
+    y += 18.0;
+    pen.text(ARIAL, 12.0, &c.set.line(), 535.0, y, false, 425.0, ink);
     y += 16.0;
     let mut x = 535.0;
     while x < 960.0 {
@@ -1170,7 +1386,7 @@ fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
         x += 7.0;
     }
     y += 10.0;
-    for line in wrap(&pen, ARIAL, 12.0, &c.share, " | ", 425.0).iter().take(3) {
+    for line in wrap(&pen, ARIAL, 12.0, &c.share, " | ", 425.0).iter().take(2) {
         y += 18.0;
         pen.text(ARIAL, 12.0, line, 535.0, y, false, 425.0, hex(SOFT));
     }
@@ -1185,14 +1401,21 @@ mod tests {
 
     #[test]
     fn figures_and_verdict() {
-        // 290 s at 60 fps with one 250 ms freeze.
+        // 290 s at 60 fps with one 250 ms freeze in the middle.
         let mut ms = vec![1000.0 / 60.0; 17_400];
-        ms.push(250.0);
+        ms.insert(8_700, 250.0);
         let s = summarize(&ms);
         assert_eq!(s.frames, 17_401);
         assert_eq!(s.freezes, 1);
         assert!((s.median - 60.0).abs() < 0.01);
-        assert!((s.min - 4.0).abs() < 0.01);
+        // Min and max: the slowest and fastest 1-second windows, not single frames.
+        assert!(s.min > 40.0 && s.min < 50.0, "min {}", s.min);
+        assert!((s.max - 60.0).abs() < 0.01, "max {}", s.max);
+        // A run shorter than a window: both are the average.
+        let short = summarize(&[10.0, 30.0]);
+        assert!((short.max - 50.0).abs() < 0.01 && (short.min - 50.0).abs() < 0.01);
+        // A 2 s stall is a window of its own at 0.5 fps.
+        assert_eq!(window_fps(&[2000.0, 500.0]), vec![0.5]);
         assert!(s.pct12 > 99.0 && s.pct12 < 100.0);
         assert!(s.low1 < s.low5 && s.low5 <= s.avg);
         let full = Duration::from_secs(300);
@@ -1201,6 +1424,86 @@ mod tests {
         assert_eq!(verdict(false, full, &s, 1000, false).0, Stamp::Invalid);
         assert_eq!(verdict(false, full, &s, 0, true).0, Stamp::Invalid);
         assert_eq!(summarize(&[]).frames, 0);
+    }
+
+    /// The canonical form and serial match Python's (`json.dumps(d, sort_keys=True,
+    /// separators=(',', ':'), ensure_ascii=False)`, `hashlib.sha256`), worked out there.
+    #[test]
+    fn canonical_json_and_serial() {
+        assert_eq!(
+            sha256(b"abc").iter().map(|b| format!("{b:02x}")).collect::<String>(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let doc = J::obj([
+            ("b", J::S("\u{e9}\"\\\n\u{1}\u{8}".into())),
+            ("a", J::A(vec![J::I(1), J::F(2.5), J::F(30.0), J::Null, J::B(true), J::F(0.1), J::F(1_234_567.891)])),
+            ("c", J::obj([("z", J::F(-0.0)), ("y", J::F(16_000.0))])),
+        ]);
+        assert_eq!(doc.canonical(), r#"{"a":[1,2.5,30.0,null,true,0.1,1234567.89],"b":"é\"\\\n\u0001\b","c":{"y":16000.0,"z":0.0}}"#);
+        assert_eq!(serial(&doc), "6797e740");
+    }
+
+    /// A result the game writes, byte for byte the fixture `tools/bench-check.py` accepts
+    /// (`python -I tools/bench-check.py crates/victory-gpu/tests/fixtures/KLBF-Bench-BM-v1-3b8db536.json`).
+    #[test]
+    fn result_matches_the_checker_fixture() {
+        let s = Summary {
+            frames: 18_000,
+            avg: 60.0,
+            median: 60.0,
+            low1: 58.5,
+            low5: 59.2,
+            min: 57.3,
+            max: 61.2,
+            pct12: 100.0,
+            freezes: 0,
+            longest_ms: 17.45,
+        };
+        let card = Card {
+            stamp: Stamp::Certified,
+            reason: "5:00 complete \u{b7} no input".into(),
+            serial: String::new(),
+            date: String::new(),
+            date_short: String::new(),
+            date_iso: "2026-11-26T21:04:05".into(),
+            elapsed: RUN,
+            s,
+            sys: Sys {
+                gpu: "AMD Radeon RX 9070 XT".into(),
+                vram_gb: 15.92,
+                cpu: "AMD Ryzen 7 7800X3D 8-Core Processor".into(),
+                ram_gb: 31.9,
+                os: "Windows 11 24H2".into(),
+            },
+            set: Settings {
+                profile: "S",
+                upscaler: "FSR",
+                texture_max_dim: 1024,
+                skipped: 12,
+                denied: 0,
+                draws_per_frame: 4321.5,
+                dropped_pct: 0.25,
+            },
+            from: String::new(),
+            player: "anonymous".into(),
+            blocked: 0,
+            share: String::new(),
+            png_name: String::new(),
+        };
+        let extra = Extra { black: 0, removed: false, compiled: [3, 7], vram: (9000 << 20, 15000 << 20), ram: 12345 << 20, why: "5:00 reached" };
+        let mut doc = result_json(&card, &extra, &[60.0, 57.3, 61.2]);
+        let J::O(m) = &mut doc else { unreachable!() };
+        // The build's own project and commit, replaced by the fixture's.
+        m.insert("project", J::S("PastiiJay/klbf-lab".into()));
+        m.insert("project_source", J::S("git".into()));
+        m.insert("sha", J::S("abc1234".into()));
+        let id = serial(&doc);
+        assert_eq!(id, "3b8db536");
+        let share = format!("[KLBF Lab Bench BM-v1] PastiiJay/klbf-lab@abc1234 | RX 9070 XT | Ryzen 7 7800X3D | avg 60.0 fps, 1% low 58.5 | CERTIFIED | {id}");
+        let J::O(m) = &mut doc else { unreachable!() };
+        m.insert("serial", J::S(id));
+        m.insert("share", J::S(share));
+        assert_eq!(doc.canonical(), include_str!("../tests/fixtures/KLBF-Bench-BM-v1-3b8db536.json"));
     }
 
     #[test]

@@ -1339,7 +1339,7 @@ pub(crate) fn title_fills(this: This) -> bool {
 
 /// The largest side, in texels, of a sampled placed texture on the host.
 #[cfg(windows)]
-fn texture_max_dim() -> Option<u64> {
+pub(crate) fn texture_max_dim() -> Option<u64> {
     static LIMIT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     *LIMIT.get_or_init(|| {
         let value = std::env::var("VICTORY_TEXTURE_MAX_DIM").ok()?;

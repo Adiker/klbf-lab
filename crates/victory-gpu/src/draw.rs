@@ -605,7 +605,7 @@ static DISPATCHED: AtomicU64 = AtomicU64::new(0);
 static ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 
 /// See [`ATTEMPTS`].
-#[cfg(all(windows, feature = "diagnostics"))]
+#[cfg(windows)]
 pub(crate) fn attempted() -> u64 {
     ATTEMPTS.load(Ordering::Relaxed)
 }
