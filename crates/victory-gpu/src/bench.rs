@@ -56,7 +56,7 @@ pub(crate) fn mark_device_removed() {
     DEVICE_GONE.store(true, Ordering::Relaxed);
 }
 
-fn is_device_removed() -> bool {
+pub(crate) fn is_device_removed() -> bool {
     if DEVICE_GONE.load(Ordering::Relaxed) {
         return true;
     }
@@ -298,7 +298,7 @@ impl BenchReport {
     }
 }
 
-fn escape_json(s: &str) -> String {
+pub(crate) fn escape_json(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {
@@ -435,7 +435,7 @@ fn percentile_sorted(sorted: &[f64], p: f64) -> f64 {
     sorted[idx.min(sorted.len() - 1)]
 }
 
-fn low_pct_fps(sorted_asc: &[f64], pct: f64) -> f64 {
+pub(crate) fn low_pct_fps(sorted_asc: &[f64], pct: f64) -> f64 {
     if sorted_asc.is_empty() {
         return 0.0;
     }
@@ -529,6 +529,10 @@ pub(crate) fn on_present(drawn: u64, black_frame: bool) {
     } else {
         WORLD_FRAME.fetch_add(1, Ordering::Relaxed) + 1
     };
+
+    // (ours) KLBF Lab Bench (`KLBF_BENCH=bm-v1`): its own frame times from the same timeline.
+    #[cfg(windows)]
+    crate::klbf_bench::on_present(black_frame, next_wf);
 
     let cfg = config();
     if !cfg.enabled {

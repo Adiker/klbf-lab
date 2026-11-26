@@ -1176,6 +1176,10 @@ mod host {
                 return None;
             }
             self.empty_until[slot] = None;
+            // (ours) KLBF Lab Bench: during the measured 5:00 the game gets a neutral pad.
+            if victory_gpu::klbf_bench::input_locked() {
+                return Some(PadState::default());
+            }
             #[allow(unused_mut)]
             let mut pad = convert(&state.Gamepad);
             // The scripted keys (`VICTORY_KEYS`) also press the first
@@ -1194,6 +1198,10 @@ mod host {
         }
 
         fn keys(&mut self) -> Vec<KeyState> {
+            // (ours) KLBF Lab Bench: and no keyboard.
+            if victory_gpu::klbf_bench::input_locked() {
+                return Vec::new();
+            }
             #[cfg(feature = "diagnostics")]
             let mut down = scripted();
             #[cfg(not(feature = "diagnostics"))]
@@ -1340,7 +1348,7 @@ mod host {
             std::env::var("VICTORY_MOUSE").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(1.0)
         });
         let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
-        if !focused() {
+        if !focused() || victory_gpu::klbf_bench::input_locked() {
             (held.taken, held.fresh, held.x, held.y) = (false, true, 0.0, 0.0);
             (held.left, held.click) = (false, false);
             TAKEN.store(false, Relaxed);

@@ -100,7 +100,8 @@ fn frame_figures() -> (f64, f64) {
 /// Starts the overlay thread for the game window `hwnd` (the first call only).
 pub(crate) fn start(hwnd: windows::Win32::Foundation::HWND, adapter: Option<IDXGIAdapter3>) {
     static ONCE: Once = Once::new();
-    if std::env::var_os("VICTORY_OVERLAY").is_some_and(|v| v == "0") {
+    // (ours) No panel during a KLBF Lab Bench run: nothing but the frame times may cost time.
+    if std::env::var_os("VICTORY_OVERLAY").is_some_and(|v| v == "0") || crate::klbf_bench::active() {
         return;
     }
     let game = hwnd.0 as usize;

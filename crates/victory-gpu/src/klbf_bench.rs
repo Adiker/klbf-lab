@@ -1,0 +1,1217 @@
+//! (ours) KLBF Lab Bench · Bayside Morning v1 (BM-v1). On with `KLBF_BENCH=bm-v1` only; nothing
+//! changes otherwise.
+//!
+//! The player loads the fixed save and touches nothing: the measurement starts at the first world
+//! frame (`crate::bench::world_frame() == 1`) and lasts 5:00. During it only frame times are kept
+//! (one push per present). From world frame 1 + 5 s the game gets a neutral controller and no
+//! keyboard ([`input_locked`]); presses are only counted. F10 or closing the window stops early
+//! (PARTIAL). At the end the results go to `bench-results` next to the exe (`KLBF_BENCH_DIR`
+//! overrides): JSON, text, and a PNG of the certificate. The certificate (the postcard template
+//! `klbf_card.png`, made by `tools/klbf-card-template.py`, with the figures written over it)
+//! then covers the whole client area, opaque, until a key or button is pressed or 60 s pass, and
+//! the run ends.
+//!
+//! The card is shown the way Neptune's overlay shows its panel: a premultiplied [`Bitmap`] in a
+//! click-through, topmost layered window (`UpdateLayeredWindow`), GDI as the glyph rasteriser.
+
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
+use windows::Win32::Graphics::Dxgi::{DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_QUERY_VIDEO_MEMORY_INFO, IDXGIAdapter3};
+use windows_sys::Win32::Foundation::{HWND, POINT, RECT, SIZE};
+use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::SystemInformation::{GetLocalTime, GlobalMemoryStatusEx, MEMORYSTATUSEX};
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+use windows_sys::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
+use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+use crate::pixels::{Bitmap, short_cpu, short_gpu};
+
+const RUN: Duration = Duration::from_secs(300);
+const GRACE: Duration = Duration::from_secs(5);
+const CARD_FOR: Duration = Duration::from_secs(60);
+const FREEZE_MS: f64 = 200.0;
+const VK_F10: i32 = 0x79;
+const VK_F12: i32 = 0x7B;
+/// The certificate without its variable texts, 1280 x 820 RGBA for the sketch's 1000 x 640 units.
+const TEMPLATE: &[u8] = include_bytes!("klbf_card.png");
+/// Build-time project and commit (`build.rs`).
+const PROJECT: &str = env!("KLBF_PROJECT");
+const PROJECT_SOURCE: &str = env!("KLBF_PROJECT_SOURCE");
+const SHA: &str = env!("KLBF_SHA");
+const ID: &str = "BM-v1";
+
+/// Whether `KLBF_BENCH=bm-v1` is set.
+pub fn active() -> bool {
+    static ON: LazyLock<bool> =
+        LazyLock::new(|| std::env::var("KLBF_BENCH").is_ok_and(|v| v.trim().eq_ignore_ascii_case("bm-v1")));
+    *ON
+}
+
+/// When the first world frame was presented (the measurement's start).
+static START: OnceLock<Instant> = OnceLock::new();
+
+/// Whether the game gets a neutral controller and no keyboard now: from world frame 1 + 5 s on,
+/// until the process ends (the card included).
+pub fn input_locked() -> bool {
+    active() && START.get().is_some_and(|t| t.elapsed() >= GRACE)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase {
+    Waiting,
+    Running,
+    Done,
+}
+
+struct Run {
+    phase: Phase,
+    last: Option<Instant>,
+    /// Frame times since the start, ms.
+    ms: Vec<f64>,
+    black: u64,
+    /// Shaders translated and pipelines made, at the start.
+    base: [u64; 2],
+}
+
+static RUN_STATE: Mutex<Run> = Mutex::new(Run { phase: Phase::Waiting, last: None, ms: Vec::new(), black: 0, base: [0; 2] });
+/// Presses the lock kept from the game.
+static BLOCKED: AtomicU64 = AtomicU64::new(0);
+static CARD: OnceLock<(Card, Instant)> = OnceLock::new();
+static SYS: OnceLock<Sys> = OnceLock::new();
+static ADAPTER: Mutex<Option<IDXGIAdapter3>> = Mutex::new(None);
+static EXIT: OnceLock<fn()> = OnceLock::new();
+
+fn run() -> std::sync::MutexGuard<'static, Run> {
+    RUN_STATE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn counters() -> [u64; 2] {
+    [crate::shader_cache::counts().1, crate::pipeline::pipeline_counts().0]
+}
+
+/// How the run ends after the card (the title's own end: suspend, save the pipeline cache, exit).
+pub fn on_exit(f: fn()) {
+    let _ = EXIT.set(f);
+}
+
+/// The window is being closed: the results are written (PARTIAL before 5:00); the close goes on.
+pub fn window_closed() {
+    if active() {
+        finish(Some("window closed"));
+    }
+}
+
+/// Called by `crate::bench::on_present` for every presented frame.
+pub(crate) fn on_present(black: bool, world_frame: u64) {
+    if !active() {
+        return;
+    }
+    let now = Instant::now();
+    let mut r = run();
+    let phase = r.phase;
+    match phase {
+        Phase::Done => return,
+        Phase::Waiting => {
+            if world_frame >= 1 {
+                let _ = START.set(now);
+                r.phase = Phase::Running;
+                r.last = Some(now);
+                r.base = counters();
+                tracing::info!("KLBF Lab Bench BM-v1: measuring 5:00 from the first world frame");
+            }
+            return;
+        }
+        Phase::Running => {}
+    }
+    if let Some(last) = r.last {
+        r.ms.push(now.duration_since(last).as_secs_f64() * 1000.0);
+    }
+    r.last = Some(now);
+    r.black += u64::from(black);
+    drop(r);
+    if START.get().is_some_and(|s| now.duration_since(*s) >= RUN) {
+        finish(None);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Figures
+
+#[derive(Clone, Copy, Default, Debug)]
+struct Summary {
+    frames: usize,
+    avg: f64,
+    median: f64,
+    low1: f64,
+    low5: f64,
+    min: f64,
+    max: f64,
+    pct12: f64,
+    freezes: usize,
+    longest_ms: f64,
+}
+
+fn summarize(ms: &[f64]) -> Summary {
+    if ms.is_empty() {
+        return Summary::default();
+    }
+    let mut sorted = ms.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let n = sorted.len();
+    let total: f64 = sorted.iter().sum();
+    let fps = |m: f64| if m > 0.0 { 1000.0 / m } else { 0.0 };
+    let median = if n.is_multiple_of(2) { 0.5 * (sorted[n / 2 - 1] + sorted[n / 2]) } else { sorted[n / 2] };
+    let fast: f64 = sorted.iter().filter(|&&m| m <= 1000.0 / 12.0).sum();
+    Summary {
+        frames: n,
+        avg: fps(total / n as f64),
+        median: fps(median),
+        low1: crate::bench::low_pct_fps(&sorted, 0.01),
+        low5: crate::bench::low_pct_fps(&sorted, 0.05),
+        min: fps(sorted[n - 1]),
+        max: fps(sorted[0]),
+        pct12: if total > 0.0 { fast * 100.0 / total } else { 0.0 },
+        freezes: sorted.iter().filter(|&&m| m > FREEZE_MS).count(),
+        longest_ms: sorted[n - 1],
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Stamp {
+    Certified,
+    Partial,
+    Invalid,
+}
+
+impl Stamp {
+    fn word(self) -> &'static str {
+        match self {
+            Stamp::Certified => "CERTIFIED",
+            Stamp::Partial => "PARTIAL",
+            Stamp::Invalid => "INVALID",
+        }
+    }
+    fn colour(self) -> [u8; 3] {
+        match self {
+            Stamp::Certified => RED,
+            Stamp::Partial => [199, 119, 0],
+            Stamp::Invalid => [90, 61, 102],
+        }
+    }
+}
+
+fn mmss(d: Duration) -> String {
+    let s = d.as_secs();
+    format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// CERTIFIED: 5:00 reached and consistent (device kept, black frames at most 1 %, no stall of
+/// 10 s or more, at least 300 frames). PARTIAL: stopped early. INVALID: not consistent.
+/// Input cannot change the run: it is kept from the game.
+fn verdict(early: bool, elapsed: Duration, s: &Summary, black: u64, removed: bool) -> (Stamp, String) {
+    if removed {
+        return (Stamp::Invalid, "device removed".into());
+    }
+    if early {
+        return (Stamp::Partial, format!("PARTIAL {} / 5:00 \u{2013} not comparable", mmss(elapsed)));
+    }
+    if s.frames < 300 {
+        return (Stamp::Invalid, "too few frames".into());
+    }
+    if black * 100 > s.frames as u64 {
+        return (Stamp::Invalid, "black frames over 1 %".into());
+    }
+    if s.longest_ms >= 10_000.0 {
+        return (Stamp::Invalid, "a stall of 10 s or more".into());
+    }
+    (Stamp::Certified, "5:00 complete \u{b7} no input".into())
+}
+
+/// The machine, read once when the window is up.
+#[derive(Clone, Default)]
+struct Sys {
+    gpu: String,
+    vram_gb: f64,
+    cpu: String,
+    ram_gb: f64,
+    os: String,
+}
+
+impl Sys {
+    fn line(&self) -> String {
+        format!(
+            "{} {:.0} GB \u{b7} {} \u{b7} {:.0} GB \u{b7} {}",
+            short_gpu(&self.gpu),
+            self.vram_gb,
+            short_cpu(&self.cpu),
+            self.ram_gb,
+            self.os
+        )
+    }
+}
+
+struct Card {
+    stamp: Stamp,
+    reason: String,
+    serial: String,
+    /// "26 Nov 2026", "26.11.26", "2026-11-26T21:04:05".
+    date: String,
+    date_short: String,
+    date_iso: String,
+    elapsed: Duration,
+    s: Summary,
+    sys: Sys,
+    from: String,
+    player: String,
+    blocked: u64,
+    share: String,
+    png_name: String,
+}
+
+fn player() -> String {
+    let p: String = std::env::var("KLBF_BENCH_PLAYER").unwrap_or_default().chars().filter(|c| !c.is_control()).take(32).collect();
+    let p = p.trim();
+    if p.is_empty() { "anonymous".into() } else { p.into() }
+}
+
+/// Freezes the measurement once, writes the results and puts the card up.
+fn finish(early: Option<&'static str>) {
+    let mut r = run();
+    if r.phase == Phase::Done {
+        return;
+    }
+    r.phase = Phase::Done;
+    let ms = std::mem::take(&mut r.ms);
+    let (black, base) = (r.black, r.base);
+    drop(r);
+    let elapsed = START.get().map_or(Duration::ZERO, Instant::elapsed);
+    let early = early.filter(|_| elapsed < RUN);
+    let removed = crate::bench::is_device_removed();
+    let s = summarize(&ms);
+    let (stamp, reason) = verdict(early.is_some(), elapsed.min(RUN), &s, black, removed);
+    let now = counters();
+    let t = local_time();
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let month = MONTHS[usize::from(t.wMonth.clamp(1, 12)) - 1];
+    let declared = if PROJECT_SOURCE == "declared" { " (declared)" } else { "" };
+    let mut card = Card {
+        stamp,
+        reason,
+        serial: String::new(),
+        date: format!("{} {month} {}", t.wDay, t.wYear),
+        date_short: format!("{:02}.{:02}.{:02}", t.wDay, t.wMonth, t.wYear % 100),
+        date_iso: format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond),
+        elapsed: elapsed.min(RUN),
+        s,
+        sys: SYS.get().cloned().unwrap_or_default(),
+        from: format!("{PROJECT} @ {SHA}{declared}"),
+        player: player(),
+        blocked: BLOCKED.load(Ordering::Relaxed),
+        share: String::new(),
+        png_name: String::new(),
+    };
+    // The serial: the first 8 hex of a hash of every frame time and the result's fields.
+    let mut h = blake3::Hasher::new();
+    for m in &ms {
+        h.update(&m.to_le_bytes());
+    }
+    h.update(format!("{}|{}|{}|{}|{:?}", card.date_iso, card.from, card.sys.line(), card.reason, card.s).as_bytes());
+    card.serial = h.finalize().to_hex().as_str()[..8].to_string();
+    card.share = format!(
+        "[KLBF Lab Bench {ID}] {PROJECT}@{SHA} | {} | {} | avg {:.1} fps, 1% low {:.1} | {} | {}",
+        short_gpu(&card.sys.gpu),
+        short_cpu(&card.sys.cpu),
+        s.avg,
+        s.low1,
+        stamp.word(),
+        card.serial
+    );
+    card.png_name = format!("bench-results\\KLBF-Bench-{ID}-{}.png", card.serial);
+    // Memory at the end only: nothing is sampled during the run.
+    let mut info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+    let adapter = ADAPTER.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    // SAFETY: a plain query filling our struct.
+    let vram = match adapter.map(|a| unsafe { a.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut info) }) {
+        Some(Ok(())) => (info.CurrentUsage, info.Budget),
+        _ => (0, 0),
+    };
+    let extra = Extra {
+        black,
+        removed,
+        compiled: [now[0].saturating_sub(base[0]), now[1].saturating_sub(base[1])],
+        vram,
+        ram: crate::host::bench_process_memory().1,
+        why: early.unwrap_or("5:00 reached"),
+    };
+    write_results(&card, &extra);
+    let _ = CARD.set((card, Instant::now()));
+}
+
+struct Extra {
+    black: u64,
+    removed: bool,
+    compiled: [u64; 2],
+    vram: (u64, u64),
+    ram: u64,
+    why: &'static str,
+}
+
+fn local_time() -> windows_sys::Win32::Foundation::SYSTEMTIME {
+    // SAFETY: a plain struct filled by the call.
+    unsafe {
+        let mut t = std::mem::zeroed();
+        GetLocalTime(&mut t);
+        t
+    }
+}
+
+fn results_dir() -> Option<PathBuf> {
+    std::env::var_os("KLBF_BENCH_DIR")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_exe().ok()?.parent().map(|p| p.join("bench-results")))
+}
+
+const MB: f64 = 1024.0 * 1024.0;
+
+fn write_results(c: &Card, x: &Extra) {
+    let s = &c.s;
+    let e = crate::bench::escape_json;
+    let json = format!(
+        concat!(
+            "{{\n",
+            "  \"bench\": \"KLBF Lab Bench\",\n  \"test\": \"Bayside Morning v1\",\n  \"test_id\": \"{}\",\n",
+            "  \"stamp\": \"{}\",\n  \"reason\": \"{}\",\n  \"stop\": \"{}\",\n  \"serial\": \"{}\",\n  \"date\": \"{}\",\n",
+            "  \"project\": \"{}\",\n  \"project_source\": \"{}\",\n  \"sha\": \"{}\",\n  \"player\": \"{}\",\n",
+            "  \"gpu\": \"{}\",\n  \"gpu_vram_gb\": {:.1},\n  \"cpu\": \"{}\",\n  \"ram_gb\": {:.1},\n  \"os\": \"{}\",\n",
+            "  \"duration_s\": {:.1},\n  \"target_s\": 300,\n  \"frames\": {},\n",
+            "  \"fps\": {{ \"avg\": {:.2}, \"median\": {:.2}, \"low_1pct\": {:.2}, \"low_5pct\": {:.2}, \"min\": {:.2}, \"max\": {:.2} }},\n",
+            "  \"pct_time_ge_12fps\": {:.2},\n  \"freezes_over_200ms\": {},\n  \"longest_frame_ms\": {:.1},\n",
+            "  \"black_frames\": {},\n  \"device_removed\": {},\n  \"inputs_blocked\": {},\n",
+            "  \"shaders_translated\": {},\n  \"pipelines_compiled\": {},\n",
+            "  \"vram_end_mb\": {:.0},\n  \"vram_budget_mb\": {:.0},\n  \"ram_end_mb\": {:.0},\n",
+            "  \"share\": \"{}\"\n}}\n"
+        ),
+        ID,
+        c.stamp.word(),
+        e(&c.reason),
+        e(x.why),
+        c.serial,
+        c.date_iso,
+        e(PROJECT),
+        PROJECT_SOURCE,
+        e(SHA),
+        e(&c.player),
+        e(&c.sys.gpu),
+        c.sys.vram_gb,
+        e(&c.sys.cpu),
+        c.sys.ram_gb,
+        e(&c.sys.os),
+        c.elapsed.as_secs_f64(),
+        s.frames,
+        s.avg,
+        s.median,
+        s.low1,
+        s.low5,
+        s.min,
+        s.max,
+        s.pct12,
+        s.freezes,
+        s.longest_ms,
+        x.black,
+        x.removed,
+        c.blocked,
+        x.compiled[0],
+        x.compiled[1],
+        x.vram.0 as f64 / MB,
+        x.vram.1 as f64 / MB,
+        x.ram as f64 / MB,
+        e(&c.share),
+    );
+    let text = [
+        "KLBF Lab Bench \u{b7} Bayside Morning v1 (BM-v1)".to_string(),
+        format!("Result:     {} \u{2013} {}", c.stamp.word(), c.reason),
+        format!("Serial:     {}", c.serial),
+        format!("Date:       {}", c.date_iso),
+        format!("From:       {} \u{b7} player: {}", c.from, c.player),
+        format!("Machine:    {}", c.sys.line()),
+        format!("Duration:   {} / 5:00 ({})", mmss(c.elapsed), x.why),
+        format!(
+            "FPS:        avg {:.1} \u{b7} median {:.1} \u{b7} 1% low {:.1} \u{b7} 5% low {:.1} \u{b7} min {:.1} \u{b7} max {:.1}",
+            s.avg, s.median, s.low1, s.low5, s.min, s.max
+        ),
+        format!("Time >= 12 fps: {:.1} %", s.pct12),
+        format!("Freezes (>200 ms): {} (longest frame {:.0} ms)", s.freezes, s.longest_ms),
+        format!("Black frames: {} \u{b7} device removed: {}", x.black, if x.removed { "yes" } else { "no" }),
+        format!("Inputs blocked: {}", c.blocked),
+        format!("Compiled during the run: {} shaders, {} pipelines", x.compiled[0], x.compiled[1]),
+        format!("At the end: VRAM {:.0} / {:.0} MB \u{b7} RAM {:.0} MB", x.vram.0 as f64 / MB, x.vram.1 as f64 / MB, x.ram as f64 / MB),
+        String::new(),
+        "Share:".into(),
+        c.share.clone(),
+        String::new(),
+    ]
+    .join("\r\n");
+    let Some(dir) = results_dir() else {
+        tracing::warn!("KLBF Lab Bench: no folder for the results");
+        return;
+    };
+    if let Err(e) = crate::bench::ensure_outside_repo(&dir) {
+        tracing::warn!(error = %e, "KLBF Lab Bench: results not written");
+        return;
+    }
+    let stem = dir.join(format!("KLBF-Bench-{ID}-{}", c.serial));
+    let png = render_png(c);
+    let written = std::fs::create_dir_all(&dir)
+        .and_then(|()| std::fs::write(stem.with_extension("json"), json))
+        .and_then(|()| std::fs::write(stem.with_extension("txt"), text))
+        .and_then(|()| std::fs::write(stem.with_extension("png"), png));
+    match written {
+        Ok(()) => {
+            let path = stem.with_extension("png");
+            tracing::info!(path = %path.display(), share = %c.share, "KLBF Lab Bench: results saved");
+            println!("KLBF Lab Bench {ID} saved: {}\n{}", path.display(), c.share);
+        }
+        Err(e) => tracing::warn!(error = %e, dir = %dir.display(), "KLBF Lab Bench: results not written"),
+    }
+}
+
+/// The card alone at the template's size, as an RGB PNG.
+fn render_png(c: &Card) -> Vec<u8> {
+    let bm = render_card(c, 1280, 820, false);
+    let rgb: Vec<u8> = bm.px.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    crate::screenshot::encode_png(bm.w as u32, bm.h as u32, &rgb)
+}
+
+// ---------------------------------------------------------------------------------------------
+// PNG decoding (8-bit RGB or RGBA, not interlaced), for the template
+
+/// Straight RGBA pixels of `png`.
+fn decode_png(png: &[u8]) -> Option<(usize, usize, Vec<u8>)> {
+    if png.get(..8)? != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
+    let (mut at, mut w, mut h, mut bpp, mut idat) = (8, 0usize, 0usize, 0usize, Vec::new());
+    while at + 8 <= png.len() {
+        let len = u32::from_be_bytes(png[at..at + 4].try_into().ok()?) as usize;
+        let kind = &png[at + 4..at + 8];
+        let data = png.get(at + 8..at + 8 + len)?;
+        match kind {
+            b"IHDR" => {
+                w = u32::from_be_bytes(data[0..4].try_into().ok()?) as usize;
+                h = u32::from_be_bytes(data[4..8].try_into().ok()?) as usize;
+                bpp = match (data[8], data[9], data[12]) {
+                    (8, 2, 0) => 3,
+                    (8, 6, 0) => 4,
+                    _ => return None,
+                };
+            }
+            b"IDAT" => idat.extend_from_slice(data),
+            b"IEND" => break,
+            _ => {}
+        }
+        at += 12 + len;
+    }
+    let stride = w * bpp;
+    let mut raw = vec![0u8; h * (stride + 1)];
+    let (out, rc) = zlib_rs::decompress_slice(&mut raw, &idat, zlib_rs::InflateConfig::default());
+    if rc != zlib_rs::ReturnCode::Ok || out.len() != h * (stride + 1) || bpp == 0 {
+        return None;
+    }
+    let mut px = vec![0u8; h * stride];
+    for y in 0..h {
+        let kind = raw[y * (stride + 1)];
+        let src = &raw[y * (stride + 1) + 1..(y + 1) * (stride + 1)];
+        let (done, row) = px.split_at_mut(y * stride);
+        let prev = if y > 0 { &done[(y - 1) * stride..] } else { &[][..] };
+        let row = &mut row[..stride];
+        for i in 0..stride {
+            let a = if i >= bpp { row[i - bpp] } else { 0 };
+            let b = prev.get(i).copied().unwrap_or(0);
+            let c = if i >= bpp { prev.get(i - bpp).copied().unwrap_or(0) } else { 0 };
+            let pred = match kind {
+                1 => a,
+                2 => b,
+                3 => ((u16::from(a) + u16::from(b)) / 2) as u8,
+                4 => crate::pixels::paeth(a, b, c),
+                _ => 0,
+            };
+            row[i] = src[i].wrapping_add(pred);
+        }
+    }
+    if bpp == 3 {
+        px = px.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect();
+    }
+    Some((w, h, px))
+}
+
+// ---------------------------------------------------------------------------------------------
+// The thread and its window (idle until the card)
+
+/// Starts our thread for the game window `hwnd` (the first call only; with `KLBF_BENCH=bm-v1`).
+pub(crate) fn start(hwnd: windows::Win32::Foundation::HWND, adapter: Option<IDXGIAdapter3>) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    if !active() {
+        return;
+    }
+    let game = hwnd.0 as usize;
+    ONCE.call_once(|| {
+        let spawned = std::thread::Builder::new().name("klbf-bench".into()).spawn(move || thread(game as HWND, adapter));
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "KLBF Lab Bench thread not started");
+        }
+    });
+}
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain([0]).collect()
+}
+
+fn reg(path: &str, name: &str) -> Option<String> {
+    use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
+    let (key, value) = (wide(path), wide(name));
+    let mut buf = [0u16; 256];
+    let mut bytes = std::mem::size_of_val(&buf) as u32;
+    // SAFETY: a buffer of the size passed.
+    let rc = unsafe {
+        RegGetValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), value.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buf.as_mut_ptr().cast(), &mut bytes)
+    };
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    (rc == 0).then(|| String::from_utf16_lossy(&buf[..len]).trim().to_string())
+}
+
+fn read_sys(adapter: Option<&IDXGIAdapter3>) -> Sys {
+    // SAFETY: a plain query.
+    let desc = adapter.and_then(|a| unsafe { a.GetDesc().ok() });
+    let gpu = desc
+        .as_ref()
+        .map(|d| String::from_utf16_lossy(&d.Description).trim_end_matches('\0').trim().to_string())
+        .unwrap_or_else(|| "GPU".into());
+    let vram_gb = desc.map_or(0.0, |d| d.DedicatedVideoMemory as f64 / (1024.0 * MB));
+    // SAFETY: a plain struct filled by the call.
+    let ram_gb = unsafe {
+        let mut ms = std::mem::zeroed::<MEMORYSTATUSEX>();
+        ms.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        GlobalMemoryStatusEx(&mut ms);
+        ms.ullTotalPhys as f64 / (1024.0 * MB)
+    };
+    let nt = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    let build: u32 = reg(nt, "CurrentBuild").and_then(|b| b.parse().ok()).unwrap_or(0);
+    let mut product = reg(nt, "ProductName").unwrap_or_else(|| "Windows".into());
+    // ProductName still says Windows 10 on 11.
+    if build >= 22000 {
+        product = product.replace("Windows 10", "Windows 11");
+    }
+    let os = format!("{} {}", product.replace("Windows", "Win"), reg(nt, "DisplayVersion").unwrap_or_default()).trim().to_string();
+    Sys {
+        gpu,
+        vram_gb,
+        cpu: reg(r"HARDWARE\DESCRIPTION\System\CentralProcessor\0", "ProcessorNameString").unwrap_or_else(|| "CPU".into()),
+        ram_gb,
+        os,
+    }
+}
+
+fn ours_in_front() -> bool {
+    let mut pid = 0u32;
+    // SAFETY: plain queries.
+    unsafe {
+        let front = GetForegroundWindow();
+        GetWindowThreadProcessId(front, &mut pid);
+        !front.is_null() && pid == GetCurrentProcessId()
+    }
+}
+
+/// XInput slots found empty, looked at again after a second (asking an empty slot is slow).
+struct Pads([Option<Instant>; 4]);
+
+impl Pads {
+    fn any(&mut self) -> bool {
+        let now = Instant::now();
+        (0..4).any(|slot| {
+            if self.0[slot].is_some_and(|t| now < t) {
+                return false;
+            }
+            let mut st = XINPUT_STATE::default();
+            // SAFETY: room for the state.
+            if unsafe { XInputGetState(slot as u32, &mut st) } != 0 {
+                self.0[slot] = Some(now + Duration::from_secs(1));
+                return false;
+            }
+            let g = st.Gamepad;
+            g.wButtons != 0
+                || g.bLeftTrigger > 30
+                || g.bRightTrigger > 30
+                || [g.sThumbLX, g.sThumbLY, g.sThumbRX, g.sThumbRY].iter().any(|v| v.unsigned_abs() > 8000)
+        })
+    }
+}
+
+/// Any key held (while a window of ours is in front) or pad input; F10 and F12 left out when
+/// `skip_ours`.
+fn any_input(pads: &mut Pads, skip_ours: bool) -> bool {
+    let keys = ours_in_front()
+        && (0x08..=0xFE)
+            .filter(|&vk| !(skip_ours && (vk == VK_F10 || vk == VK_F12)))
+            // SAFETY: plain queries.
+            .any(|vk| unsafe { GetAsyncKeyState(vk) } < 0);
+    keys || pads.any()
+}
+
+fn exit_now() {
+    static ONCE: AtomicBool = AtomicBool::new(false);
+    if ONCE.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tracing::info!("KLBF Lab Bench: card closed, ending the run");
+    match EXIT.get() {
+        Some(f) => f(),
+        None => std::process::exit(0),
+    }
+}
+
+/// Sets the layered window's picture and position in one go (as Neptune's overlay does).
+///
+/// # Safety
+/// `window` is a live layered window of this thread.
+unsafe fn present(window: HWND, bm: &Bitmap, at: POINT) {
+    // SAFETY: a 32-bit top-down DIB the size of the bitmap, filled with its premultiplied pixels
+    // as BGRA, handed to UpdateLayeredWindow, then freed.
+    unsafe {
+        let screen = GetDC(std::ptr::null_mut());
+        let dc = CreateCompatibleDC(screen);
+        let info = dib_info(bm.w as i32, bm.h as i32);
+        let mut bits = std::ptr::null_mut();
+        let dib = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, std::ptr::null_mut(), 0);
+        if !dib.is_null() && !bits.is_null() {
+            let dst = std::slice::from_raw_parts_mut(bits.cast::<u8>(), bm.px.len());
+            for (d, s) in dst.chunks_exact_mut(4).zip(bm.px.chunks_exact(4)) {
+                d.copy_from_slice(&[s[2], s[1], s[0], s[3]]);
+            }
+            let old = SelectObject(dc, dib);
+            let size = SIZE { cx: bm.w as i32, cy: bm.h as i32 };
+            let from = POINT { x: 0, y: 0 };
+            let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
+            UpdateLayeredWindow(window, screen, &at, &size, dc, &from, 0, &blend, ULW_ALPHA);
+            SelectObject(dc, old);
+            DeleteObject(dib);
+        }
+        DeleteDC(dc);
+        ReleaseDC(std::ptr::null_mut(), screen);
+    }
+}
+
+fn dib_info(w: i32, h: i32) -> BITMAPINFO {
+    BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: w,
+            biHeight: -h,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB,
+            biSizeImage: 0,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        },
+        bmiColors: [RGBQUAD { rgbBlue: 0, rgbGreen: 0, rgbRed: 0, rgbReserved: 0 }],
+    }
+}
+
+unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: usize, lp: isize) -> isize {
+    // SAFETY: the standard handlers; the picture is set by `present`, not by painting.
+    unsafe {
+        match msg {
+            WM_NCHITTEST => HTTRANSPARENT as isize,
+            WM_MOUSEACTIVATE => MA_NOACTIVATE as isize,
+            _ => DefWindowProcW(hwnd, msg, wp, lp),
+        }
+    }
+}
+
+fn thread(game: HWND, adapter: Option<IDXGIAdapter3>) {
+    let _ = SYS.set(read_sys(adapter.as_ref()));
+    *ADAPTER.lock().unwrap_or_else(|e| e.into_inner()) = adapter;
+    let class = wide("KlbfLabBench");
+    const KEYS: usize = 1;
+    // SAFETY: window class and window made and used on this thread only.
+    unsafe {
+        let instance = GetModuleHandleW(std::ptr::null());
+        let wc = WNDCLASSW {
+            style: 0,
+            lpfnWndProc: Some(proc),
+            cbClsExtra: 0,
+            cbWndExtra: 0,
+            hInstance: instance,
+            hIcon: std::ptr::null_mut(),
+            hCursor: std::ptr::null_mut(),
+            hbrBackground: std::ptr::null_mut(),
+            lpszMenuName: std::ptr::null(),
+            lpszClassName: class.as_ptr(),
+        };
+        RegisterClassW(&wc);
+        let window = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            class.as_ptr(),
+            class.as_ptr(),
+            WS_POPUP,
+            0,
+            0,
+            10,
+            10,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            instance,
+            std::ptr::null(),
+        );
+        if window.is_null() {
+            tracing::warn!("KLBF Lab Bench window not created");
+            return;
+        }
+        tracing::info!("KLBF Lab Bench BM-v1 on (F10 stops the run)");
+        SetTimer(window, KEYS, 40, None);
+        let mut pads = Pads([None; 4]);
+        let (mut f10, mut pressed, mut armed) = (false, false, false);
+        let mut shown_secs = u64::MAX;
+        // The card at the client size, drawn once per size.
+        let mut cache: Option<Bitmap> = None;
+        let mut msg = std::mem::zeroed::<MSG>();
+        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
+            if !(msg.message == WM_TIMER && msg.hwnd == window) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+                continue;
+            }
+            if let Some((card, at)) = CARD.get() {
+                // Released first, then any press (or 60 s) closes.
+                let now = any_input(&mut pads, false);
+                if !armed {
+                    armed = !now;
+                } else if now {
+                    exit_now();
+                }
+                if at.elapsed() >= CARD_FOR {
+                    exit_now();
+                }
+                // Redrawn once a second (the countdown) or when the window's size changes.
+                let left = CARD_FOR.saturating_sub(at.elapsed()).as_secs();
+                let mut client = std::mem::zeroed::<RECT>();
+                let mut origin = POINT { x: 0, y: 0 };
+                let there = IsWindow(game) != 0
+                    && IsIconic(game) == 0
+                    && GetClientRect(game, &mut client) != 0
+                    && ClientToScreen(game, &mut origin) != 0;
+                if !there {
+                    ShowWindow(window, SW_HIDE);
+                    continue;
+                }
+                let (cw, ch) = (client.right.max(1) as usize, client.bottom.max(1) as usize);
+                let resized = cache.as_ref().is_none_or(|b| (b.w, b.h) != (cw, ch));
+                if resized {
+                    cache = Some(render_card(card, cw, ch, true));
+                } else if left == shown_secs {
+                    continue;
+                }
+                shown_secs = left;
+                let Some(base) = cache.as_ref() else { continue };
+                let mut bm = Bitmap { w: base.w, h: base.h, px: base.px.clone() };
+                footer(&mut bm, &format!("Any key or button closes \u{b7} {left} s"));
+                present(window, &bm, origin);
+                SetWindowPos(window, HWND_TOPMOST, origin.x, origin.y, bm.w as i32, bm.h as i32, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                continue;
+            }
+            let d10 = GetAsyncKeyState(VK_F10) < 0;
+            if d10 && !f10 && ours_in_front() {
+                finish(Some("F10"));
+            }
+            f10 = d10;
+            if input_locked() {
+                let now = any_input(&mut pads, true);
+                if now && !pressed {
+                    BLOCKED.fetch_add(1, Ordering::Relaxed);
+                }
+                pressed = now;
+            }
+            // A game that stops presenting still ends at 5:00.
+            if START.get().is_some_and(|s| s.elapsed() >= RUN) {
+                finish(None);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Drawing the variable parts: coverage masks, GDI text
+
+/// A coverage mask (0..=255), `w` x `h`; `ascent`/`adv` for text.
+struct Mask {
+    w: usize,
+    h: usize,
+    v: Vec<u8>,
+    ascent: f32,
+    adv: f32,
+}
+
+impl Mask {
+    fn new(w: usize, h: usize) -> Mask {
+        Mask { w, h, v: vec![0; w * h], ascent: 0.0, adv: 0.0 }
+    }
+
+    fn max(&mut self, x: i32, y: i32, c: u8) {
+        if x >= 0 && y >= 0 && (x as usize) < self.w && (y as usize) < self.h {
+            let p = &mut self.v[y as usize * self.w + x as usize];
+            *p = (*p).max(c);
+        }
+    }
+
+    fn get(&self, x: i32, y: i32) -> f32 {
+        if x >= 0 && y >= 0 && (x as usize) < self.w && (y as usize) < self.h { f32::from(self.v[y as usize * self.w + x as usize]) } else { 0.0 }
+    }
+
+    fn sample(&self, x: f32, y: f32) -> f32 {
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let (xi, yi) = (x0 as i32, y0 as i32);
+        let top = self.get(xi, yi) * (1.0 - fx) + self.get(xi + 1, yi) * fx;
+        let bottom = self.get(xi, yi + 1) * (1.0 - fx) + self.get(xi + 1, yi + 1) * fx;
+        top * (1.0 - fy) + bottom * fy
+    }
+
+    fn rect(&mut self, x0: f32, y0: f32, x1: f32, y1: f32) {
+        for y in y0.round() as i32..y1.round() as i32 {
+            for x in x0.round() as i32..x1.round() as i32 {
+                self.max(x, y, 255);
+            }
+        }
+    }
+
+    fn blit(&mut self, m: &Mask, x: i32, y: i32) {
+        for j in 0..m.h {
+            for i in 0..m.w {
+                self.max(x + i as i32, y + j as i32, m.v[j * m.w + i]);
+            }
+        }
+    }
+
+    /// `m` turned by `a` radians (clockwise on screen) about its centre, centred at (cx, cy).
+    fn blit_rotated(&mut self, m: &Mask, cx: f32, cy: f32, a: f32) {
+        let r = ((m.w * m.w + m.h * m.h) as f32).sqrt() / 2.0 + 1.0;
+        let (sin, cos) = a.sin_cos();
+        let (hw, hh) = (m.w as f32 / 2.0, m.h as f32 / 2.0);
+        for y in (cy - r).floor() as i32..=(cy + r).ceil() as i32 {
+            for x in (cx - r).floor() as i32..=(cx + r).ceil() as i32 {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let (sx, sy) = (dx * cos + dy * sin + hw, -dx * sin + dy * cos + hh);
+                let c = m.sample(sx - 0.5, sy - 0.5);
+                if c > 0.5 {
+                    self.max(x, y, c.min(255.0) as u8);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Font(&'static str, i32);
+const IMPACT: Font = Font("Impact", 400);
+const ARIAL: Font = Font("Arial", 400);
+const ARIAL_BOLD: Font = Font("Arial", 700);
+const ARIAL_BLACK: Font = Font("Arial Black", 900);
+const GEORGIA: Font = Font("Georgia", 400);
+const UI: Font = Font("Segoe UI", 400);
+
+/// GDI as a glyph rasteriser only (as Neptune's overlay): `s` drawn white on black into a scratch
+/// DIB; its grey level is the coverage. `extra`: pixels added after each character.
+fn text(font: Font, px: f32, extra: f32, s: &str) -> Mask {
+    let t: Vec<u16> = s.encode_utf16().collect();
+    let face = wide(font.0);
+    let mut out = Mask::new(0, 0);
+    if t.is_empty() {
+        return out;
+    }
+    // SAFETY: a memory DC, a font and a DIB section made, used and freed here; the DIB is read
+    // after GdiFlush within its w x h x 4 bytes.
+    unsafe {
+        let dc = CreateCompatibleDC(std::ptr::null_mut());
+        if dc.is_null() {
+            return out;
+        }
+        let f = CreateFontW(-(px.round() as i32).max(1), 0, 0, 0, font.1, 0, 0, 0, 1, 0, 0, ANTIALIASED_QUALITY as u32, 0, face.as_ptr());
+        if !f.is_null() {
+            let old_font = SelectObject(dc, f);
+            SetTextCharacterExtra(dc, extra.round() as i32);
+            let mut size = SIZE { cx: 0, cy: 0 };
+            GetTextExtentPoint32W(dc, t.as_ptr(), t.len() as i32, &mut size);
+            let mut tm = std::mem::zeroed::<TEXTMETRICW>();
+            GetTextMetricsW(dc, &mut tm);
+            let (w, h) = (size.cx + (px * 0.2) as i32 + 2, size.cy.max(1));
+            let info = dib_info(w, h);
+            let mut bits = std::ptr::null_mut();
+            let dib = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, std::ptr::null_mut(), 0);
+            if !dib.is_null() && !bits.is_null() && w > 0 {
+                let old = SelectObject(dc, dib);
+                SetBkMode(dc, TRANSPARENT as i32);
+                SetTextColor(dc, 0x00ff_ffff);
+                TextOutW(dc, 1, 0, t.as_ptr(), t.len() as i32);
+                GdiFlush();
+                let grey = std::slice::from_raw_parts(bits.cast::<u8>(), (w * h) as usize * 4);
+                out = Mask::new(w as usize, h as usize);
+                for (o, p) in out.v.iter_mut().zip(grey.chunks_exact(4)) {
+                    *o = p[1];
+                }
+                out.ascent = tm.tmAscent as f32;
+                out.adv = size.cx as f32;
+                SelectObject(dc, old);
+                DeleteObject(dib);
+            }
+            SelectObject(dc, old_font);
+            DeleteObject(f);
+        }
+        DeleteDC(dc);
+    }
+    out
+}
+
+fn put(bm: &mut Bitmap, x: i32, y: i32, rgb: [u8; 3], a: u32) {
+    if x >= 0 && y >= 0 {
+        bm.over(x as usize, y as usize, rgb, a.min(255));
+    }
+}
+
+/// `m` laid on `bm` with its corner at (x, y), in `rgb` at opacity `a`.
+fn paint(bm: &mut Bitmap, m: &Mask, x: i32, y: i32, a: u32, rgb: [u8; 3]) {
+    for j in 0..m.h {
+        for i in 0..m.w {
+            let c = u32::from(m.v[j * m.w + i]);
+            if c > 0 {
+                put(bm, x + i as i32, y + j as i32, rgb, (c * a + 127) / 255);
+            }
+        }
+    }
+}
+
+fn hex(c: u32) -> [u8; 3] {
+    [(c >> 16) as u8, (c >> 8) as u8, c as u8]
+}
+
+const INK: u32 = 0x3b2240;
+const SOFT: u32 = 0x6b4a5a;
+const RED: [u8; 3] = [0xd6, 0x26, 0x4f];
+const BACKDROP: [u8; 3] = [0x1d, 0x14, 0x24];
+
+/// Card units (the sketch's 1000 x 640) to pixels.
+struct Pen<'a> {
+    bm: &'a mut Bitmap,
+    ox: f32,
+    oy: f32,
+    k: f32,
+}
+
+impl Pen<'_> {
+    fn x(&self, u: f32) -> f32 {
+        self.ox + u * self.k
+    }
+    fn y(&self, v: f32) -> f32 {
+        self.oy + v * self.k
+    }
+
+    /// Text with its baseline at (x, base), left-aligned or centred, shrunk to fit `max_w`.
+    /// Returns the width drawn, in units.
+    #[allow(clippy::too_many_arguments)]
+    fn text(&mut self, font: Font, size: f32, s: &str, x: f32, base: f32, centre: bool, max_w: f32, rgb: [u8; 3]) -> f32 {
+        let mut m = text(font, size * self.k, 0.0, s);
+        let w = m.adv / self.k;
+        if w > max_w && w > 0.0 {
+            m = text(font, size * self.k * max_w / w, 0.0, s);
+        }
+        let w = m.adv / self.k;
+        let left = if centre { x - w / 2.0 } else { x };
+        paint(self.bm, &m, self.x(left).round() as i32 - 1, (self.y(base) - m.ascent).round() as i32, 255, rgb);
+        w
+    }
+
+    fn width(&self, font: Font, size: f32, s: &str) -> f32 {
+        text(font, size * self.k, 0.0, s).adv / self.k
+    }
+}
+
+/// `s` split at `sep` into lines no wider than `max_w` units at `size`.
+fn wrap(pen: &Pen, font: Font, size: f32, s: &str, sep: &str, max_w: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for part in s.split(sep) {
+        if let Some(last) = lines.last_mut() {
+            let joined = format!("{last}{sep}{part}");
+            if pen.width(font, size, &joined) <= max_w {
+                *last = joined;
+                continue;
+            }
+        }
+        lines.push(part.to_string());
+    }
+    lines
+}
+
+fn card_scale(w: usize, h: usize) -> f32 {
+    (w as f32 / 1060.0).min(h as f32 / 700.0)
+}
+
+fn footer(bm: &mut Bitmap, s: &str) {
+    let k = card_scale(bm.w, bm.h);
+    let m = text(UI, 14.0 * k, 0.0, s);
+    let y = (bm.h as f32 / 2.0 + 330.0 * k).min(bm.h as f32 - m.h as f32 - 2.0);
+    paint(bm, &m, ((bm.w as f32 - m.adv) / 2.0) as i32, y as i32, 255, [200, 186, 210]);
+}
+
+static TEMPLATE_PX: LazyLock<Option<(usize, usize, Vec<u8>)>> = LazyLock::new(|| decode_png(TEMPLATE));
+
+/// The certificate, opaque, `w` x `h` px: the template (scaled to fit, centred on a dark backdrop
+/// when `framed`, else filling the bitmap) with the variable texts written over it.
+fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
+    let mut bm = Bitmap::new(w, h);
+    for p in bm.px.chunks_exact_mut(4) {
+        p.copy_from_slice(&[BACKDROP[0], BACKDROP[1], BACKDROP[2], 255]);
+    }
+    let (k, ox, oy) = if framed {
+        let k = card_scale(w, h);
+        (k, (w as f32 - 1000.0 * k) / 2.0, (h as f32 - 640.0 * k) / 2.0 - 10.0 * k)
+    } else {
+        ((w as f32 / 1000.0).min(h as f32 / 640.0), 0.0, 0.0)
+    };
+    // The template, bilinear.
+    if let Some((tw, th, px)) = TEMPLATE_PX.as_ref() {
+        let (tw, th) = (*tw, *th);
+        let (dw, dh) = ((1000.0 * k).round() as i32, (640.0 * k).round() as i32);
+        let (sx, sy) = (tw as f32 / dw as f32, th as f32 / dh as f32);
+        let texel = |x: i32, y: i32| -> [f32; 4] {
+            let (x, y) = (x.clamp(0, tw as i32 - 1) as usize, y.clamp(0, th as i32 - 1) as usize);
+            let p = &px[(y * tw + x) * 4..][..4];
+            let a = f32::from(p[3]) / 255.0;
+            [f32::from(p[0]) * a, f32::from(p[1]) * a, f32::from(p[2]) * a, f32::from(p[3])]
+        };
+        for j in 0..dh {
+            for i in 0..dw {
+                let (fx, fy) = ((i as f32 + 0.5) * sx - 0.5, (j as f32 + 0.5) * sy - 0.5);
+                let (x0, y0) = (fx.floor(), fy.floor());
+                let (ax, ay) = (fx - x0, fy - y0);
+                let (xi, yi) = (x0 as i32, y0 as i32);
+                let (p00, p10, p01, p11) = (texel(xi, yi), texel(xi + 1, yi), texel(xi, yi + 1), texel(xi + 1, yi + 1));
+                let v: [f32; 4] = std::array::from_fn(|n| (p00[n] * (1.0 - ax) + p10[n] * ax) * (1.0 - ay) + (p01[n] * (1.0 - ax) + p11[n] * ax) * ay);
+                if v[3] < 0.5 {
+                    continue;
+                }
+                let rgb = [0, 1, 2].map(|n| (v[n] * 255.0 / v[3]).clamp(0.0, 255.0) as u8);
+                put(&mut bm, ox.round() as i32 + i, oy.round() as i32 + j, rgb, v[3] as u32);
+            }
+        }
+    }
+    let mut pen = Pen { bm: &mut bm, ox, oy, k };
+    let ink = hex(INK);
+    // Left: the date and how it ended.
+    pen.text(GEORGIA, 18.0, &format!("{} \u{b7} {}", c.date, c.reason), 255.0, 394.0, true, 370.0, ink);
+    // Postmark: serial and date at the bottom, inside the ring.
+    pen.text(ARIAL, 11.0, &format!("{} \u{b7} {}", c.serial, c.date_short), 880.0, 176.0, true, 96.0, RED);
+    // The band across the postmark's centre, -14 degrees, see-through.
+    let kk = pen.k;
+    let (bw, bh) = (196.0 * kk, 38.0 * kk);
+    let mut word = text(ARIAL_BLACK, 22.0 * kk, 3.0 * kk, c.stamp.word());
+    if word.adv > bw - 16.0 * kk {
+        word = text(ARIAL_BLACK, 22.0 * kk * (bw - 16.0 * kk) / word.adv, 0.0, c.stamp.word());
+    }
+    let mut fill = Mask::new(bw as usize, bh as usize);
+    fill.rect(0.0, 0.0, bw, bh);
+    let mut edge = Mask::new(bw as usize, bh as usize);
+    let t = 3.0 * kk;
+    edge.rect(0.0, 0.0, bw, t);
+    edge.rect(0.0, bh - t, bw, bh);
+    edge.rect(0.0, 0.0, t, bh);
+    edge.rect(bw - t, 0.0, bw, bh);
+    let mut letters = Mask::new(bw as usize, bh as usize);
+    letters.blit(&word, ((bw - word.adv) / 2.0) as i32 - 1, ((bh - word.h as f32) / 2.0) as i32);
+    let side = (230.0 * kk) as usize;
+    let (bx, by) = (pen.x(880.0) - side as f32 / 2.0, pen.y(120.0) - side as f32 / 2.0);
+    for (m, rgb, alpha) in [(&fill, hex(0xfff6ee), 115), (&edge, c.stamp.colour(), 255), (&letters, c.stamp.colour(), 230)] {
+        let mut turned = Mask::new(side, side);
+        turned.blit_rotated(m, side as f32 / 2.0, side as f32 / 2.0, -14f32.to_radians());
+        paint(pen.bm, &turned, bx as i32, by as i32, alpha, rgb);
+    }
+    // From: project and player.
+    pen.text(ARIAL_BOLD, 18.0, &c.from, 600.0, 275.0, false, 360.0, ink);
+    pen.text(ARIAL, 15.0, &format!("player: {}", c.player), 600.0, 300.0, false, 360.0, ink);
+    // The average, big, and the four tiles.
+    pen.text(IMPACT, 64.0, &format!("{:.1}", c.s.avg), 535.0, 380.0, false, 135.0, ink);
+    let tiles = [format!("{:.1}", c.s.median), format!("{:.1}", c.s.low1), format!("{:.1}", c.s.max), format!("{:.0} %", c.s.pct12)];
+    for (i, value) in tiles.iter().enumerate() {
+        pen.text(IMPACT, 28.0, value, 535.0 + 108.0 * i as f32 + 50.0, 434.0, true, 92.0, ink);
+    }
+    // Freezes and duration; the machine in bold (wrapped, then shrunk, to fit); the share line.
+    let blocked = if c.blocked > 0 { format!(" \u{b7} {} inputs blocked", c.blocked) } else { String::new() };
+    pen.text(ARIAL, 14.0, &format!("freezes {} \u{b7} {} in the world{blocked}", c.s.freezes, mmss(c.elapsed)), 535.0, 484.0, false, 425.0, ink);
+    let mut y = 484.0;
+    for line in wrap(&pen, ARIAL_BOLD, 14.0, &c.sys.line(), " \u{b7} ", 425.0).iter().take(2) {
+        y += 20.0;
+        pen.text(ARIAL_BOLD, 14.0, line, 535.0, y, false, 425.0, ink);
+    }
+    y += 16.0;
+    let mut x = 535.0;
+    while x < 960.0 {
+        let (x0, y0, x1, y1) = (pen.x(x), pen.y(y - 0.5), pen.x((x + 3.0).min(960.0)), pen.y(y + 0.5).max(pen.y(y - 0.5) + 1.0));
+        for py in y0.round() as i32..y1.round() as i32 {
+            for px in x0.round() as i32..x1.round() as i32 {
+                put(pen.bm, px, py, hex(0x7a5a6a), 255);
+            }
+        }
+        x += 7.0;
+    }
+    y += 10.0;
+    for line in wrap(&pen, ARIAL, 12.0, &c.share, " | ", 425.0).iter().take(3) {
+        y += 18.0;
+        pen.text(ARIAL, 12.0, line, 535.0, y, false, 425.0, hex(SOFT));
+    }
+    // Where the PNG went.
+    pen.text(ARIAL, 11.0, &format!("Saved: {}", c.png_name), 500.0, 621.0, true, 940.0, hex(SOFT));
+    bm
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn figures_and_verdict() {
+        // 290 s at 60 fps with one 250 ms freeze.
+        let mut ms = vec![1000.0 / 60.0; 17_400];
+        ms.push(250.0);
+        let s = summarize(&ms);
+        assert_eq!(s.frames, 17_401);
+        assert_eq!(s.freezes, 1);
+        assert!((s.median - 60.0).abs() < 0.01);
+        assert!((s.min - 4.0).abs() < 0.01);
+        assert!(s.pct12 > 99.0 && s.pct12 < 100.0);
+        assert!(s.low1 < s.low5 && s.low5 <= s.avg);
+        let full = Duration::from_secs(300);
+        assert_eq!(verdict(false, full, &s, 0, false).0, Stamp::Certified);
+        assert_eq!(verdict(true, Duration::from_secs(83), &s, 0, false).1, "PARTIAL 1:23 / 5:00 \u{2013} not comparable");
+        assert_eq!(verdict(false, full, &s, 1000, false).0, Stamp::Invalid);
+        assert_eq!(verdict(false, full, &s, 0, true).0, Stamp::Invalid);
+        assert_eq!(summarize(&[]).frames, 0);
+    }
+
+    #[test]
+    fn png_round_trip_and_template() {
+        let rgb: Vec<u8> = (0..5 * 3 * 3).map(|i| (i * 37 % 251) as u8).collect();
+        let png = crate::screenshot::encode_png(5, 3, &rgb);
+        let (w, h, px) = decode_png(&png).expect("decodes");
+        assert_eq!((w, h), (5, 3));
+        let back: Vec<u8> = px.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+        assert_eq!(back, rgb);
+        let (w, h, _) = decode_png(TEMPLATE).expect("template decodes");
+        assert_eq!((w, h), (1280, 820));
+    }
+}

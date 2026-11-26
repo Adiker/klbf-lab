@@ -40,6 +40,8 @@ pub mod frametime;
 #[cfg(windows)]
 mod host;
 #[cfg(windows)]
+pub mod klbf_bench;
+#[cfg(windows)]
 mod overlay;
 #[cfg(windows)]
 mod pixels;

@@ -77,7 +77,7 @@ pub(crate) fn filter_row(kind: u8, row: &[u8], prev: &[u8], bpp: usize, out: &mu
     }
 }
 
-fn paeth(a: u8, b: u8, c: u8) -> u8 {
+pub(crate) fn paeth(a: u8, b: u8, c: u8) -> u8 {
     let (ia, ib, ic) = (i16::from(a), i16::from(b), i16::from(c));
     let p = ia + ib - ic;
     let (pa, pb, pc) = ((p - ia).abs(), (p - ib).abs(), (p - ic).abs());
