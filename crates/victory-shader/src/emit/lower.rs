@@ -247,6 +247,8 @@ struct Lower<'a> {
     /// Compute code that reads other lanes: thread ids follow the host
     /// lanes, so lane n is console lane n.
     console_lanes: bool,
+    /// Masks as numbers that hold every lane or none (see [`whole_masks`]).
+    whole: HashSet<Value>,
     /// Mesh: the thread index in the group (made in the entry block).
     flat: Option<V>,
     /// 64-bit float wave sums made (their two dwords), by the terms' dwords, mask and the
@@ -522,6 +524,73 @@ fn need(block: usize) {
             n.push(block);
         }
     });
+}
+
+/// Scalar values that hold every lane or none, the same in all of them: a
+/// scalar condition made a mask (`s_cselect` of -1 and 0), copies, joins and
+/// combinations of such. In wave64 a value is its pair's low dword, and the
+/// pair's two dwords are alike. Which lane's bit is read does not matter.
+fn whole_masks(p: &Program, st: &Structured, wave64: bool) -> HashSet<Value> {
+    let is_mask = |v: Value| st.masks.contains_key(&v) || st.highs.contains_key(&v);
+    // what each value is made of: dwords of registers by (low, high)
+    type Pair = (Value, Option<Value>);
+    let mut made: HashMap<Value, (Option<Value>, Vec<Pair>)> = HashMap::new();
+    let width = if wave64 { "_b64" } else { "_b32" };
+    for block in &p.blocks {
+        for phi in &block.phis {
+            let Reg::S(c) = phi.reg else { continue };
+            if c >= EXEC {
+                continue;
+            }
+            if !wave64 {
+                made.insert(phi.value, (None, phi.args.iter().map(|&a| (a, None)).collect()));
+            } else if let Some(high) = block.phis.iter().find(|h| h.reg == Reg::S(c + 1)) {
+                let args = phi.args.iter().copied().zip(high.args.iter().map(|&h| Some(h)));
+                made.insert(phi.value, (Some(high.value), args.collect()));
+            }
+        }
+        for inst in &block.insts {
+            let Fields::Sop { dst: Some(Operand::Scalar { code, .. }), src, imm: None } = &inst.fields else {
+                continue;
+            };
+            let name = inst.name();
+            let known = ["s_cselect", "s_mov", "s_not", "s_and", "s_or", "s_xor", "s_andn2", "s_orn2", "s_nand", "s_nor", "s_xnor"];
+            if *code >= EXEC || !name.strip_suffix(width).is_some_and(|n| known.contains(&n)) {
+                continue;
+            }
+            let Some(lo) = inst.write(Reg::S(*code)) else { continue };
+            let hi = if wave64 { inst.write(Reg::S(*code + 1)) } else { None };
+            let of: Option<Vec<Pair>> = src
+                .iter()
+                .filter_map(|op| match *op {
+                    // 0 and -1
+                    Operand::Const(128 | 193) => None,
+                    Operand::Scalar { code, .. } if code < EXEC && code != NULL => {
+                        let hi = if wave64 { inst.read(Reg::S(code + 1)) } else { None };
+                        Some(inst.read(Reg::S(code)).map(|lo| (lo, hi)))
+                    }
+                    _ => Some(None),
+                })
+                .collect();
+            if let Some(of) = of {
+                made.insert(lo, (hi, of));
+            }
+        }
+    }
+    made.retain(|&v, _| !is_mask(v));
+    loop {
+        let bad: Vec<Value> = made
+            .iter()
+            .filter(|(_, (_, of))| !of.iter().all(|(lo, hi)| made.get(lo).is_some_and(|m| m.0 == *hi)))
+            .map(|x| *x.0)
+            .collect();
+        if bad.is_empty() {
+            return made.into_keys().collect();
+        }
+        for v in bad {
+            made.remove(&v);
+        }
+    }
 }
 
 /// VGPR values that are the same in every lane holding them (`all` is [`all_lane_blocks`]):
@@ -1405,6 +1474,7 @@ impl<'a> Lower<'a> {
             writes_uavs,
             src0: None,
             console_lanes,
+            whole: whole_masks(x.p, x.st, x.native.wave64),
             split_lds,
             lds_meet,
             local: exchange.is_some() && LOCAL_WAVES.get(),
@@ -2682,6 +2752,56 @@ impl<'a> Lower<'a> {
         self.load_any_input(id, index + 1)
     }
 
+    /// `v_div_fixup`: the quotient `q` of `num` and `den`, or what the
+    /// division of the two gives where they are special. Halves as floats
+    /// too.
+    fn div_fixup(&mut self, q: V, den: V, num: V) -> V {
+        let c = self.cur;
+        let (qi, di, ni) = (self.as_int(q), self.as_int(den), self.as_int(num));
+        let (ksign, kabs, kinf) = (
+            self.s.m.i32(0x8000_0000),
+            self.s.m.i32(0x7FFF_FFFF),
+            self.s.m.i32(0x7F80_0000),
+        );
+        let (kqnan_bit, kneg_qnan, zero) = (
+            self.s.m.i32(0x0040_0000),
+            self.s.m.i32(0xFFC0_0000),
+            self.s.m.i32(0),
+        );
+        let sign = {
+            let x = self.s.m.bin(c, Bin::Xor, ni, di);
+            self.s.m.bin(c, Bin::And, x, ksign)
+        };
+        let q_abs = self.s.m.bin(c, Bin::And, qi, kabs);
+        let d_abs = self.s.m.bin(c, Bin::And, di, kabs);
+        let n_abs = self.s.m.bin(c, Bin::And, ni, kabs);
+        let q_nan = self.s.m.cmp(c, pred::IUGT, q_abs, kinf);
+        let d_nan = self.s.m.cmp(c, pred::IUGT, d_abs, kinf);
+        let n_nan = self.s.m.cmp(c, pred::IUGT, n_abs, kinf);
+        let d_inf = self.s.m.cmp(c, pred::EQ, d_abs, kinf);
+        let n_inf = self.s.m.cmp(c, pred::EQ, n_abs, kinf);
+        let d_zero = self.s.m.cmp(c, pred::EQ, d_abs, zero);
+        let n_zero = self.s.m.cmp(c, pred::EQ, n_abs, zero);
+        let both_inf = self.s.m.bin(c, Bin::And, n_inf, d_inf);
+        let both_zero = self.s.m.bin(c, Bin::And, n_zero, d_zero);
+        let invalid = self.s.m.bin(c, Bin::Or, both_inf, both_zero);
+        let make_inf = {
+            let t = self.s.m.bin(c, Bin::Or, n_inf, d_zero);
+            self.s.m.bin(c, Bin::Or, t, q_nan)
+        };
+        let make_zero = self.s.m.bin(c, Bin::Or, d_inf, n_zero);
+        let signed_q = self.s.m.bin(c, Bin::Or, sign, q_abs);
+        let signed_inf = self.s.m.bin(c, Bin::Or, sign, kinf);
+        let n_qnan = self.s.m.bin(c, Bin::Or, ni, kqnan_bit);
+        let d_qnan = self.s.m.bin(c, Bin::Or, di, kqnan_bit);
+        let r = self.s.m.select(c, make_zero, sign, signed_q);
+        let r = self.s.m.select(c, make_inf, signed_inf, r);
+        let r = self.s.m.select(c, invalid, kneg_qnan, r);
+        let r = self.s.m.select(c, d_nan, d_qnan, r);
+        let r = self.s.m.select(c, n_nan, n_qnan, r);
+        self.as_float(r)
+    }
+
     fn i32_of(&mut self, v: Value) -> Result<V, Why> {
         match self.get(v)? {
             Val::I32(x) => Ok(x),
@@ -3743,6 +3863,11 @@ impl<'a> Lower<'a> {
             // lanes it adds only feed derivatives, and exports keep their own
             // masks. Wrong if such a section had a side effect.
             Atom::Quad(_) => Ok(self.s.m.bool(true)),
+            Atom::Opaque(v) if self.whole.contains(&v) => {
+                let lo = self.i32_of(v)?;
+                let z = self.s.m.i32(0);
+                Ok(self.s.m.cmp(at, pred::NE, lo, z))
+            }
             // With console lanes, a mask held as a number is the console's:
             // the lane tests its own bit.
             Atom::Opaque(v) if self.console_lanes => {
@@ -7175,50 +7300,8 @@ impl<'a> Lower<'a> {
             }
             "v_div_fixup_f32" => {
                 let (q, den, num) = (f(self, 0)?, f(self, 1)?, f(self, 2)?);
-                let (qi, di, ni) = (self.as_int(q), self.as_int(den), self.as_int(num));
-                let (ksign, kabs, kinf) = (
-                    self.s.m.i32(0x8000_0000),
-                    self.s.m.i32(0x7FFF_FFFF),
-                    self.s.m.i32(0x7F80_0000),
-                );
-                let (kqnan_bit, kneg_qnan, zero) = (
-                    self.s.m.i32(0x0040_0000),
-                    self.s.m.i32(0xFFC0_0000),
-                    self.s.m.i32(0),
-                );
-                let sign = {
-                    let x = self.s.m.bin(c, Bin::Xor, ni, di);
-                    self.s.m.bin(c, Bin::And, x, ksign)
-                };
-                let q_abs = self.s.m.bin(c, Bin::And, qi, kabs);
-                let d_abs = self.s.m.bin(c, Bin::And, di, kabs);
-                let n_abs = self.s.m.bin(c, Bin::And, ni, kabs);
-                let q_nan = self.s.m.cmp(c, pred::IUGT, q_abs, kinf);
-                let d_nan = self.s.m.cmp(c, pred::IUGT, d_abs, kinf);
-                let n_nan = self.s.m.cmp(c, pred::IUGT, n_abs, kinf);
-                let d_inf = self.s.m.cmp(c, pred::EQ, d_abs, kinf);
-                let n_inf = self.s.m.cmp(c, pred::EQ, n_abs, kinf);
-                let d_zero = self.s.m.cmp(c, pred::EQ, d_abs, zero);
-                let n_zero = self.s.m.cmp(c, pred::EQ, n_abs, zero);
-                let both_inf = self.s.m.bin(c, Bin::And, n_inf, d_inf);
-                let both_zero = self.s.m.bin(c, Bin::And, n_zero, d_zero);
-                let invalid = self.s.m.bin(c, Bin::Or, both_inf, both_zero);
-                let make_inf = {
-                    let t = self.s.m.bin(c, Bin::Or, n_inf, d_zero);
-                    self.s.m.bin(c, Bin::Or, t, q_nan)
-                };
-                let make_zero = self.s.m.bin(c, Bin::Or, d_inf, n_zero);
-                let signed_q = self.s.m.bin(c, Bin::Or, sign, q_abs);
-                let signed_inf = self.s.m.bin(c, Bin::Or, sign, kinf);
-                let n_qnan = self.s.m.bin(c, Bin::Or, ni, kqnan_bit);
-                let d_qnan = self.s.m.bin(c, Bin::Or, di, kqnan_bit);
-                let r = self.s.m.select(c, make_zero, sign, signed_q);
-                let r = self.s.m.select(c, make_inf, signed_inf, r);
-                let r = self.s.m.select(c, invalid, kneg_qnan, r);
-                let r = self.s.m.select(c, d_nan, d_qnan, r);
-                let r = self.s.m.select(c, n_nan, n_qnan, r);
-                let rf = self.as_float(r);
-                float(self, rf)
+                let r = self.div_fixup(q, den, num);
+                float(self, r)
             }
             "v_fmac_f32" | "v_mac_f32" | "v_mac_legacy_f32" => {
                 let (a, bb) = (f(self, 0)?, f(self, 1)?);
@@ -7500,6 +7583,12 @@ impl<'a> Lower<'a> {
                 const UNTRACKED: Why = "a select on an untracked mask";
                 let cond = match mask.and_then(|m| self.x.st.masks.get(&m).copied()) {
                     Some(m) => self.boolean(m, c)?,
+                    // A scalar condition as a mask: every lane's bit is alike.
+                    None if mask.is_some_and(|m| self.whole.contains(&m)) => {
+                        let lo = self.i32_of(mask.ok_or(UNTRACKED)?).map_err(|_| UNTRACKED)?;
+                        let z = self.s.m.i32(0);
+                        self.s.m.cmp(c, pred::NE, lo, z)
+                    }
                     // A mask the code holds as a number (a constant bit
                     // pattern: every other lane, every other pair...):
                     // this lane's bit of it. Exact where host lanes are
@@ -7894,6 +7983,7 @@ impl<'a> Lower<'a> {
             "v_mad_f16",
             "v_fmac_f16",
             "v_mac_f16",
+            "v_div_fixup_f16",
             "v_max3_f16",
             "v_min3_f16",
             "v_med3_f16",
@@ -8024,6 +8114,7 @@ impl<'a> Lower<'a> {
                 // shortcut: fused f16 multiply-adds as FMad in f32 (the
                 // product is exact; the sum rounds twice).
                 "v_fma_f16" | "v_fmac_f16" | "v_mad_f16" | "v_mac_f16" => self.fmad(a, b, acc),
+                "v_div_fixup_f16" => self.div_fixup(a, b, acc),
                 "v_max3_f16" => {
                     let t = self.max_min(true, a, b);
                     self.max_min(true, t, acc)
