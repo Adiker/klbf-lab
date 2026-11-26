@@ -332,6 +332,8 @@ struct Card {
     player: String,
     blocked: u64,
     share: String,
+    /// "KLBF-Bench-BM-v1-YYYYMMDD-HHMM-<serial>": the PNG, JSON and text files' name.
+    file_stem: String,
     png_name: String,
 }
 
@@ -377,6 +379,7 @@ fn finish(early: Option<&'static str>) {
         player: player(),
         blocked: BLOCKED.load(Ordering::Relaxed),
         share: String::new(),
+        file_stem: String::new(),
         png_name: String::new(),
     };
     // Memory at the end only: nothing is sampled during the run.
@@ -406,7 +409,9 @@ fn finish(early: Option<&'static str>) {
         stamp.word(),
         card.serial
     );
-    card.png_name = format!("bench-results\\KLBF-Bench-{ID}-{}.png", card.serial);
+    // Local date and time first, so the results sort and never overwrite each other.
+    card.file_stem = format!("KLBF-Bench-{ID}-{:04}{:02}{:02}-{:02}{:02}-{}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, card.serial);
+    card.png_name = format!("bench-results\\{}.png", card.file_stem);
     if let J::O(m) = &mut doc {
         m.insert("serial", J::S(card.serial.clone()));
         m.insert("share", J::S(card.share.clone()));
@@ -678,7 +683,7 @@ fn write_results(c: &Card, x: &Extra, json: &str) {
         tracing::warn!(error = %e, "KLBF Lab Bench: results not written");
         return;
     }
-    let stem = dir.join(format!("KLBF-Bench-{ID}-{}", c.serial));
+    let stem = dir.join(&c.file_stem);
     let png = render_png(c);
     let written = std::fs::create_dir_all(&dir)
         .and_then(|()| std::fs::write(stem.with_extension("json"), json))
@@ -1488,6 +1493,7 @@ mod tests {
             player: "anonymous".into(),
             blocked: 0,
             share: String::new(),
+            file_stem: String::new(),
             png_name: String::new(),
         };
         let extra = Extra { black: 0, removed: false, compiled: [3, 7], vram: (9000 << 20, 15000 << 20), ram: 12345 << 20, why: "5:00 reached" };
