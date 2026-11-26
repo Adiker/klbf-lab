@@ -4,6 +4,8 @@
   <img src="https://img.shields.io/badge/version-Lab%2035-1f46c8" alt="version: Lab 35">
   <img src="https://img.shields.io/badge/prologue-~7%20fps-1f46c8" alt="prologue: about 7 fps">
   <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
+  <a href="https://github.com/PastiiJay/klbf-lab/tree/beta-2"><img src="https://img.shields.io/badge/new%20test%20build-beta--2-2ea44f" alt="new test build: beta-2"></a>
+  <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>
 </p>
 
 <p align="center"><b>Played from a new game to the open world: the first character's prologue and the second character's first mission completed, free roam from the second character's house, on an AMD Radeon RX 9070 XT.</b></p>
@@ -14,6 +16,51 @@ This is the one version we recommend. It is meant for every graphics card; so fa
 
 > [!TIP]
 > **Playing on Linux / Proton?** Our Linux work is led by community member **[@zocram4cc](https://github.com/zocram4cc)**: see his Wine/Proton fixes ([#34](https://github.com/PastiiJay/klbf-lab/pull/34), [#35](https://github.com/PastiiJay/klbf-lab/pull/35)), the [Linux notes in the guide](docs/GUIDE.md#linux--proton-community-notes) and the RX 7800 XT report by [@Adiker](https://github.com/Adiker) ([#19](https://github.com/PastiiJay/klbf-lab/issues/19)). Post Linux results in an issue and tag @zocram4cc.
+
+## New test build: [`beta-2`](https://github.com/PastiiJay/klbf-lab/tree/beta-2) (26 Nov 2026)
+
+> **📏 A shared frame-rate standard.** Numbers between projects cannot be compared today (empty seas, menus, one lucky second). We propose one method for everyone: same starting save, same route, three tables (frame rate seen in the world, stability index, average performance index). **[Read the method](docs/klbf/MEASUREMENT.md)**, use it, and post your numbers.
+
+A new test build on the **[`beta-2` branch](https://github.com/PastiiJay/klbf-lab/tree/beta-2)**: correct faces and hair, many more frames per second, and a launcher (`play.ps1`). Measured in a real play session with a controller on an RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, following the shared method. No cherry-picked numbers: these come from ordinary play.
+
+**Frame rate seen in the world** (peaks by situation)
+
+| Situation | fps |
+|---|---|
+| Standing still, looking at the sky | up to 27 |
+| On foot in a quiet area (by a lake or a river) | up to 23 |
+| Standing still in traffic, busy neighbourhood | up to 17 |
+| On foot on a motorway slip road | up to 16 |
+| On foot in a busy neighbourhood | up to 14 |
+| Driving over a bridge above water | up to 17 |
+| Driving a truck at moderate speed | up to 15 |
+| Driving fast through streets (the world streams in) | up to 12 |
+
+<!-- live-start -->
+**Stability index**: how the frame rate is spread over a real play session still running, **24 minutes so far without a crash** (270 samples, on foot and driving; updated every 5 minutes of play):
+
+| fps | Share of the time |
+|---|---|
+| 18 and more | 15 % |
+| 15–18 | 28 % |
+| 12–15 | 29 % |
+| 9–12 | 17 % |
+| 5–9 | 6 % |
+| under 5 (freezes) | 5 % |
+
+**Average performance index**, same session: average 14.0 fps, median 14.4, 5 % low 2.3, 1 % low 0.2 (the lows are the freezes).
+<!-- live-end -->
+
+Known issues:
+- Occasional freezes when the card or PC memory fills (try `-LowMemory`).
+- Some shadows flicker near trees; very distant trees sometimes flash black.
+- Lake water sometimes flickers or disappears.
+- Mirrors stay black (they need ray tracing).
+- Car windows (glass) are not drawn: you can break into a car but the glass is invisible.
+- Resolution is Series S, upscaled.
+
+
+The older Lab 35 status below is kept for reference.
 
 ## Status (2026-11-25, Lab 35)
 
