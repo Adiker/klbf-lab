@@ -53,6 +53,9 @@ pub mod object;
 pub mod pipeline;
 #[cfg(windows)]
 mod primitive;
+// (ours) the sampling profiler of byartesao/victory-giga-fork (VICTORY_PROFILE=1)
+#[cfg(all(windows, feature = "diagnostics"))]
+mod profile;
 pub mod query;
 pub mod queue;
 pub mod resource;
@@ -91,3 +94,10 @@ pub use watch::{
     title_memory_remapping, title_memory_remapping_range, title_memory_written, writing as kernel_will_write,
     written_through_view,
 };
+
+/// (ours) How many threads of this crate are inside a write-watch asking and inside a
+/// change of protection now (`watch::INSIDE`).
+#[cfg(windows)]
+pub fn address_calls() -> [u32; 2] {
+    [0, 1].map(|i| watch::INSIDE[i].load(std::sync::atomic::Ordering::Relaxed))
+}

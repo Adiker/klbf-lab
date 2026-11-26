@@ -878,6 +878,7 @@ pub(crate) fn ours_before(at: usize, len: usize) -> Option<Vec<usize>> {
     let mut granularity = 0;
     // SAFETY: the answer buffer holds `count` entries.
     let failed = unsafe {
+        let _inside = inside(0);
         GetWriteWatch(
             WRITE_WATCH_FLAG_RESET,
             first as *const _,
@@ -972,6 +973,7 @@ pub(crate) fn ours_flush() {
             let mut granularity = 0;
             // SAFETY: the answer buffer holds `count` entries.
             let failed = unsafe {
+                let _inside = inside(0);
                 GetWriteWatch(WRITE_WATCH_FLAG_RESET, first as *const _, last - first, found.as_mut_ptr().cast(), &mut count, &mut granularity)
             } != 0;
             COUNTS[5].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1126,6 +1128,7 @@ fn ask_kernel_found(j: &mut Journal, first: usize, last: usize) -> Option<usize>
     // SAFETY: the answer buffer holds `count` entries.
     let failed = known_view(first * PAGE)
         || unsafe {
+            let _inside = inside(0);
             GetWriteWatch(
                 WRITE_WATCH_FLAG_RESET,
                 (first * PAGE) as *const _,
@@ -1205,6 +1208,7 @@ pub(crate) fn writes(start: usize, end: usize, guarded: bool) -> Option<(u64, Ve
         let started = std::time::Instant::now();
         // SAFETY: the answer buffer holds `count` entries.
         let failed = unsafe {
+            let _inside = inside(0);
             GetWriteWatch(
                 WRITE_WATCH_FLAG_RESET,
                 (first * PAGE) as *const _,
@@ -1582,7 +1586,7 @@ fn protect_alias(g: &mut Guards, block: usize) {
     }
     let mut old = 0;
     // SAFETY: title view memory; only its protection changes.
-    if unsafe { VirtualProtect((block * BLOCK) as *const _, BLOCK, PAGE_READONLY, &mut old) } != 0 {
+    if unsafe { let _inside = inside(1); VirtualProtect((block * BLOCK) as *const _, BLOCK, PAGE_READONLY, &mut old) } != 0 {
         g.protected.insert(block);
     }
 }
@@ -1594,6 +1598,7 @@ fn protect_here(g: &mut Guards, from: usize, to: usize) {
         let mut old = 0;
         // SAFETY: title view memory; only its protection changes.
         unsafe {
+            let _inside = inside(1);
             VirtualProtect(
                 (from * BLOCK) as *const _,
                 (to - from) * BLOCK,
@@ -1677,10 +1682,10 @@ fn open_here(g: &mut Guards, start: usize, end: usize) -> bool {
             let mut old = 0;
             // SAFETY: blocks we made read-only, one after the other. (One call for the run;
             // if it is refused, block by block as before.)
-            if unsafe { VirtualProtect((first * BLOCK) as *const _, n * BLOCK, PAGE_READWRITE, &mut old) } == 0 {
+            if unsafe { let _inside = inside(1); VirtualProtect((first * BLOCK) as *const _, n * BLOCK, PAGE_READWRITE, &mut old) } == 0 {
                 for block in first..first + n {
                     // SAFETY: a block we made read-only.
-                    unsafe { VirtualProtect((block * BLOCK) as *const _, BLOCK, PAGE_READWRITE, &mut old) };
+                    unsafe { let _inside = inside(1); VirtualProtect((block * BLOCK) as *const _, BLOCK, PAGE_READWRITE, &mut old) };
                 }
             }
         }
@@ -2709,4 +2714,23 @@ mod mapping_tests {
         assert_eq!(answer.recv().unwrap(), (false, true));
         drop(changing);
     }
+}
+
+/// (ours) Threads of ours inside a call that takes the process's address space now: asking
+/// the write watch, changing a protection. The runtime's page mapping (`xmem`) looks at
+/// these when a mapping call of the title's begins, to say what it waited behind.
+pub static INSIDE: [std::sync::atomic::AtomicU32; 2] = [const { std::sync::atomic::AtomicU32::new(0) }; 2];
+
+/// One of ours inside such a call, until it is dropped.
+pub struct Inside(usize);
+
+impl Drop for Inside {
+    fn drop(&mut self) {
+        INSIDE[self.0].fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+fn inside(kind: usize) -> Inside {
+    INSIDE[kind].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Inside(kind)
 }
