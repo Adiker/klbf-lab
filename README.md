@@ -23,6 +23,8 @@ This is the one version we recommend. It is meant for every graphics card; so fa
 >
 > <!-- latest-run-start -->
 > **Latest run:** 2026-11-26 · [PastiiJay](https://github.com/PastiiJay) · [PastiiJay/klbf-lab@a0687b7](https://github.com/PastiiJay/klbf-lab/tree/a0687b7) · AMD Radeon RX 9070 XT / AMD Ryzen 7 9800X3D 8-Core Processor · 14.3 fps avg (median 17.0, 1 % low 3.6) · profile S, FSR · [card](https://github.com/user-attachments/assets/c973f94d-651b-4feb-a90f-bdc82e23f5d0) · [JSON](docs/klbf/bench/bm-v1/KLBF-Bench-BM-v1-20261126-1653-5096b690.json) · reference run — KLBF Lab test machine
+>
+> <a href="https://github.com/user-attachments/assets/c973f94d-651b-4feb-a90f-bdc82e23f5d0"><img src="https://github.com/user-attachments/assets/c973f94d-651b-4feb-a90f-bdc82e23f5d0" width="560" alt="KLBF Lab Bench card"></a>
 > <!-- latest-run-end -->
 
 > **📏 A shared frame-rate standard.** Numbers between projects cannot be compared today (empty seas, menus, one lucky second). We propose one method for everyone: same starting save, same route, three tables (frame rate seen in the world, stability index, average performance index). **[Read the method](docs/klbf/MEASUREMENT.md)**, use it, and post your numbers.

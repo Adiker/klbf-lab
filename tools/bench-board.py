@@ -49,12 +49,14 @@ def latest_line(d, stem, card, repo, reference):
     """The README's one line for the most recent run; stem relative to the repository root."""
     a, st = d['fps'], d.get('settings') or {}
     short = ', '.join(bc.cell(st[k]) for k in ('profile', 'upscaler') if st.get(k) not in (None, ''))
-    return ' · '.join(x for x in [
+    line = ' · '.join(x for x in [
         f"> **Latest run:** {bc.cell(d['date'])[:10]}", bc.player_link(d), bc.project_link(d, repo),
         f"{bc.cell(d['gpu'])} / {bc.cell(d['cpu'])}",
         f"{a['avg']:.1f} fps avg (median {a['median']:.1f}, 1 % low {a['low_1pct']:.1f})",
         f'profile {short}' if st.get('profile') else short, f'[card]({card}) · [JSON]({stem}.json)',
         bc.REFERENCE if reference else ''] if x)
+    # The card itself (our own drawing and the run's figures, no game picture), shown under the line.
+    return line + (f'\n>\n> <a href="{card}"><img src="{card}" width="560" alt="KLBF Lab Bench card"></a>' if card else '')
 
 
 def vendor(gpu):
