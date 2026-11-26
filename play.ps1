@@ -19,7 +19,11 @@ if (-not (Test-Path $GameDir)) { throw "Game folder not found: $GameDir (use -Ga
 if (-not $Exe) { $Exe = (Get-ChildItem $GameDir -Filter *.exe | Sort-Object Length -Descending | Select-Object -First 1).FullName }
 
 # The same settings for pre-build and play: the shader cache key depends on them.
-Get-ChildItem Env:VICTORY_* -ErrorAction SilentlyContinue | Remove-Item
+# Preserve explicit adapter overrides for hardware retests. With none set, the
+# executable chooses its defaults using the D3D12 adapter it actually opened.
+$adapterOverrides = @('VICTORY_AHEAD_FIRST', 'VICTORY_CARD_FLAGGED', 'VICTORY_PASSES_AHEAD', 'VICTORY_RELAY')
+Get-ChildItem Env:VICTORY_* -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -notin $adapterOverrides } | Remove-Item
 $set = [ordered]@{
   VICTORY_GAME_DIR = $GameDir
   VICTORY_OVERLAY = '0'

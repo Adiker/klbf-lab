@@ -62,7 +62,7 @@ Known issues:
 - Mirrors stay black (they need ray tracing).
 - Car windows (glass) are not drawn: you can break into a car but the glass is invisible.
 - Resolution is Series S, upscaled.
-- AMD RDNA 2 cards (RX 6000 series) get safe defaults automatically (`VICTORY_AHEAD_FIRST`, `VICTORY_CARD_FLAGGED`, `VICTORY_PASSES_AHEAD` and `VICTORY_RELAY` off unless you set them), which avoids the device loss after 25-72 s. Thanks to @BlackBu7let for the bisect (#52).
+- AMD RDNA 2 cards (RX 6000 series) get safe defaults automatically (`VICTORY_AHEAD_FIRST`, `VICTORY_CARD_FLAGGED`, `VICTORY_PASSES_AHEAD` and `VICTORY_RELAY` off unless you set them), which avoids the device loss after 25-72 s. Thanks to @BlackBu7let for the bisect (#52). For a single-switch retest through `play.ps1`, set the corresponding environment variable before launching. Remove it before the default run (for example, `Remove-Item Env:VICTORY_AHEAD_FIRST -ErrorAction SilentlyContinue`).
 
 ## Build and run
 
