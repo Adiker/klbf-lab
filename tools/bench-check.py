@@ -110,7 +110,7 @@ def settings(d):
     return ' · '.join(f.format(cell(st[k])) for k, f in SETTINGS if st.get(k) not in (None, ''))
 
 
-def row(d, stem, card=None):
+def row(d, stem, card=None, repo=None):
     """The board row; stem is the result's path without extension, relative to the board page.
     The player is linked only once check() has matched it to the submitter's login."""
     player = cell(d['player'])
@@ -118,7 +118,11 @@ def row(d, stem, card=None):
         player = f'[{player}](https://github.com/{player})'
     proof = f'[JSON]({stem}.json)' + (f' · [card]({card})' if card else '')
     proj, sha = cell(d['project']), cell(d['sha'])
-    project = f'[{proj} @ {sha}](https://github.com/{proj}/tree/{sha})' if d['project_source'] == 'git' else f'{proj} @ {sha}'
+    # A build from git links its commit; otherwise the repo URL given with the submission.
+    if d['project_source'] == 'git':
+        project = f'[{proj} @ {sha}](https://github.com/{proj}/tree/{sha})'
+    else:
+        project = f'[{proj} @ {sha}]({repo})' if repo else f'{proj} @ {sha}'
     a = d['fps']
     return ' | '.join([
         '', player, project, f"{cell(d['gpu'])} {d['gpu_vram_gb']:.0f} GB", cell(d['cpu']), f"{d['ram_gb']:.0f} GB",
