@@ -22,7 +22,7 @@ This is the one version we recommend. It is meant for every graphics card; so fa
 > **🧪🌴 New: KLBF Lab Bench · Bayside Morning v1.** A 5-minute hands-off test from the same spot for everyone, input locked, with a certified postcard at the end. [How to run it](docs/klbf/BENCH-BM-V1.md) · [Results by hardware](docs/klbf/BAYSIDE-MORNING-V1.md). Lab 63 also fixes dark faces in shade and skips the intro movie on request.
 >
 > <!-- latest-run-start -->
-> _Latest run: none yet._
+> **Latest run:** 2026-11-26 · [PastiiJay](https://github.com/PastiiJay) · [PastiiJay/klbf-lab@a0687b7](https://github.com/PastiiJay/klbf-lab/tree/a0687b7) · AMD Radeon RX 9070 XT / AMD Ryzen 7 9800X3D 8-Core Processor · 14.3 fps avg (median 17.0, 1 % low 3.6) · profile S, FSR · [card](https://github.com/user-attachments/assets/c973f94d-651b-4feb-a90f-bdc82e23f5d0) · [JSON](docs/klbf/bench/bm-v1/KLBF-Bench-BM-v1-20261126-1653-5096b690.json) · reference run — KLBF Lab test machine
 > <!-- latest-run-end -->
 
 > **📏 A shared frame-rate standard.** Numbers between projects cannot be compared today (empty seas, menus, one lucky second). We propose one method for everyone: same starting save, same route, three tables (frame rate seen in the world, stability index, average performance index). **[Read the method](docs/klbf/MEASUREMENT.md)**, use it, and post your numbers.
