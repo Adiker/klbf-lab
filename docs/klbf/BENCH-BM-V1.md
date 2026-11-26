@@ -12,6 +12,22 @@ itself: you load one save, press Continue and touch nothing. Results: [Bayside M
 - A progress point at the male lead's house (about 3 % progress, where you can first save in his bed).
 - Nothing else heavy running during the 5 minutes.
 
+### A build without the bench (fallback)
+
+Another project can add the bench to its own build: see
+[ADD-THE-BENCH.md](https://github.com/PastiiJay/klbf-lab/blob/beta-2/docs/klbf/ADD-THE-BENCH.md).
+Until then, or for a layer it does not fit, the same run can be measured from the build's log:
+play the same save the same way, keep the console log, then:
+
+```powershell
+python -I tools/fps-session.py <log file> --bench bm-v1 --gpu "<GPU>" --cpu "<CPU>" --build "<owner/repo@commit>"
+```
+
+It keeps exactly 300 s of world time from the first world sample (a sample with the world on
+screen) and prints the usual summary and share line, marked **NOT CERTIFIED (no input lock, no
+card)**: nothing stops a press from changing the run, and there is no card or serial. Such a result
+is fine for checking your own builds; the board lists only CERTIFIED runs.
+
 ## Make the save (once)
 
 1. Sleep until the morning at the male lead's house.

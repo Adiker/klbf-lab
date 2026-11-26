@@ -1,5 +1,7 @@
 # Frame-rate report for one play session, following docs/klbf/MEASUREMENT.md.
-# Usage: python fps-session.py <log file> [--gpu "RX 9070 XT 16 GB"] [--cpu "..."] [--build "..."] [--out report.json]
+# Usage: python fps-session.py <log file> [--gpu "RX 9070 XT 16 GB"] [--cpu "..."] [--build "..."] [--out report.json] [--bench bm-v1]
+# --bench bm-v1: the fallback for a build without the bench module (docs/klbf/BENCH-BM-V1.md): exactly 300 s of world time
+# from the first world sample. NOT CERTIFIED: nothing locks the input and no card is made.
 # Reads the per-second "N fps, ... M draws/frame" lines; keeps samples with the world on screen (>= 1000 draws).
 # Prints the three tables, a one-line summary to paste anywhere, and writes a JSON file others can compare.
 # Duration comes from the log's own timestamps, not from what anyone types; the line ends with the log's fingerprint
@@ -8,6 +10,7 @@ import argparse, codecs, hashlib, io, json, re
 ap = argparse.ArgumentParser()
 ap.add_argument('log'); ap.add_argument('--gpu', default='?'); ap.add_argument('--cpu', default='?')
 ap.add_argument('--build', default='?'); ap.add_argument('--out', default='fps-report.json')
+ap.add_argument('--bench', choices=['bm-v1'])
 a = ap.parse_args()
 ansi = re.compile(r'\x1b\[[0-9;]*m')
 from datetime import datetime
@@ -45,17 +48,23 @@ def read_session(path):
             yield from session_samples(lines)
 
 
+BENCH_S = 300
+NOT_CERTIFIED = 'NOT CERTIFIED (no input lock, no card)'
 v, t = [], []
 bad = 0
 for line in read_session(a.log):
     m = sample.search(line)
     if m and int(m.group(3)) >= 1000:
+        ts = re.match(r'(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)', line)
+        if a.bench and not ts:
+            continue  # the cut is by the log's clock: an untimed sample cannot be placed
+        if a.bench and t and (datetime.fromisoformat(ts.group(1)) - t[0]).total_seconds() >= BENCH_S:
+            break
         fps, ms = float(m.group(1)), float(m.group(2))
         # Each line carries both the rate and the frame time: an edited rate no longer matches its frame time.
         if ms > 0 and abs(fps - 1000 / ms) > max(0.6, 0.08 * fps):
             bad += 1
         v.append(fps)
-        ts = re.match(r'(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)', line)
         if ts:
             d = datetime.fromisoformat(ts.group(1))
             if t and d < t[-1]:
@@ -76,11 +85,19 @@ r = {'method': 'KLBF Lab shared measurement (docs/klbf/MEASUREMENT.md)', 'build'
      'minutes': round((t[-1] - t[0]).total_seconds() / 60, 1) if len(t) > 1 else 0, 'average': round(sum(v) / n, 1), 'median': round(median(s), 2), 'low_5pct': low(5), 'low_1pct': low(1),
      'peak': s[-1], 'stability_index_pct': spread, 'samples': n,
      'from_utc': t[0].isoformat() if t else '', 'to_utc': t[-1].isoformat() if t else '', 'log_sha256_16': digest, 'consistency': 'ok' if bad == 0 else f'{bad} lines do not add up'}
+if a.bench:
+    world_s = round((t[-1] - t[0]).total_seconds()) + 1 if t else 0  # one-second samples: the last one counts in full
+    r['bench'] = {'id': 'BM-v1', 'mode': 'fallback (fps-session.py)', 'verdict': NOT_CERTIFIED,
+                  'world_seconds': min(world_s, BENCH_S), 'complete': world_s >= BENCH_S}
+    ended = '5:00 of world time' if world_s >= BENCH_S else f'PARTIAL {world_s // 60}:{world_s % 60:02d} / 5:00, not comparable'
+    print(f'KLBF Lab Bench BM-v1, fallback: {ended}. {NOT_CERTIFIED}.')
 print(f"Average performance index: average {r['average']} fps, median {r['median']}, 5 % low {r['low_5pct']}, 1 % low {r['low_1pct']} ({n} samples, {r['minutes']} min)")
 print('Stability index: ' + ', '.join(f'{k} {p} %' for k, p in spread.items()))
 share = (f"[KLBF benchmark] {a.build} | {a.gpu} | {a.cpu} | {r['minutes']} min real play | avg {r['average']} fps, "
          f"median {r['median']}, 1% low {r['low_1pct']}, peak {r['peak']} | time at 12+ fps: {round(100 * sum(fps >= 12 for fps in v) / n)} % "
          f"| {n} samples {r['from_utc'][11:16]}-{r['to_utc'][11:16]} UTC | log {digest} | check {r['consistency']}")
+if a.bench:
+    share = f'[KLBF Lab Bench BM-v1 fallback | {NOT_CERTIFIED}] ' + share.removeprefix('[KLBF benchmark] ')
 print('\nShare this line:\n' + share)
 json.dump(r, open(a.out, 'w', encoding='utf8'), indent=2)
 print(f'\nSaved {a.out}')
