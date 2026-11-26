@@ -6,12 +6,16 @@ Every project reports frame rates from different places and in different ways: a
 
 - Play from a new game until you first arrive at the male lead's house (about 3 % progress), at the point where you can make your first save in his bed. Save there, sleeping until the morning, so every run starts at the same time of day: the sun's position changes shadows, reflections and the frame rate. Every run starts from this morning save.
 
-## What to play
+## What to play: the standard drive
 
-1. Walk out of the house to his car.
-2. Wander his neighbourhood: some driving (streets, a junction, a bridge if there is one nearby), some walking.
-3. Also stop for a while: standing still in traffic, standing still looking at the sky, on foot in a quiet spot.
-4. Play at least 15 minutes, as you would normally. No pausing in an empty scene to raise the average.
+1. Load the morning save in the male lead's house.
+2. Open the map and set the GPS to the first objective the game offers at that point (it proposes two markers; take the first story one, the errand that sends you across the neighbourhood).
+3. Walk out to his car and drive there by the GPS route, as you normally would.
+4. Stop the measurement once you are parked at the marker.
+
+Why this route: it comes very early in the game, so anyone can reach it quickly; loading it is one of the fastest loads (you start inside the house, with no cutscene); and the drive crosses streets, junctions and busy blocks, which is where frame rates really drop. Everyone driving the same route gives numbers that can be compared.
+
+Optional, after the drive: stand still in traffic, look at the sky, walk in a quiet spot, and report those peaks separately.
 
 ## What to report
 
