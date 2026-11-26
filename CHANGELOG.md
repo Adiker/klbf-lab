@@ -4,6 +4,11 @@ Every KLBF Lab version, newest first. Measured on one machine: Windows 11, AMD R
 
 Product and controller names (Xbox, DualSense…) are only used to say what a build works with. They belong to their owners; KLBF Lab is not affiliated with or endorsed by them.
 
+## Lab 63.1 — Test build `beta-2` — 26 Nov 2026
+- **Bench timer fix:** the time now shows in the game window's title ("KLBF Lab · Bench 2:13 / 5:00"; "waiting for the world" before; the normal title after), and the corner label is placed from the game window's own rectangle, so it follows a game on a second monitor. Updated once a second at most; the FPS caption stays off during the run.
+- **Add the bench to another project:** `docs/klbf/ADD-THE-BENCH.md` (VIctory-derived trees). Everything the module reads from the layer now sits in one block of `klbf_bench.rs`.
+- **Result:** not measured yet (no change to rendering since Lab 63).
+
 ## Lab 63 — Test build `beta-2` — 26 Nov 2026
 - **Bench BM-v1 built in** (`KLBF_BENCH=bm-v1`): 5:00 from the first world frame, input locked, certificate saved as PNG, JSON and text. Min and max are 1-second windows; the JSON (schema 1, SHA-256 serial) records the settings. Bench side of PR #78 (Vladimir-Human); its input replay is left out.
 - **Skip movies:** `-SkipMovies open|end|fast` (`VICTORY_SKIP_MOVIES`, zocram4cc and Yz, PR #77).

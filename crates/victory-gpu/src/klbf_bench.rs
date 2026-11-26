@@ -9,7 +9,11 @@
 //! overrides): JSON, text, and a PNG of the certificate. The certificate (the postcard template
 //! `klbf_card.png`, made by `tools/klbf-card-template.py`, with the figures written over it)
 //! then covers the whole client area, opaque, until a key or button is pressed or 60 s pass, and
-//! the run ends.
+//! the run ends. During the run the time (no figures) shows in the game window's title and in a
+//! small label at the window's top-left corner.
+//!
+//! Hooks into the rest of the layer, and how to add the module to another VIctory-derived tree:
+//! `docs/klbf/ADD-THE-BENCH.md`.
 //!
 //! The card is shown the way Neptune's overlay shows its panel: a premultiplied [`Bitmap`] in a
 //! click-through, topmost layered window (`UpdateLayeredWindow`), GDI as the glyph rasteriser.
@@ -91,10 +95,50 @@ fn run() -> std::sync::MutexGuard<'static, Run> {
     RUN_STATE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+// ---------------------------------------------------------------------------------------------
+// The tree: everything the module reads from the rest of the layer, here and nowhere else (plus
+// `crate::pixels`). A port to another VIctory-derived tree changes only these lines; a figure the
+// tree does not have may return 0 (docs/klbf/ADD-THE-BENCH.md).
+
 /// Shaders translated, pipelines made, draws run, draws asked for (run or dropped), so far.
 fn counters() -> [u64; 4] {
     [crate::shader_cache::counts().1, crate::pipeline::pipeline_counts().0, crate::draw::drawn(), crate::draw::attempted()]
 }
+
+/// "S" (Series S profile) or "X".
+fn profile() -> &'static str {
+    if crate::console::current() == crate::console::Console::SeriesS { "S" } else { "X" }
+}
+
+/// The texture size cap in effect, px (0: none); pipelines skipped; pipelines denied.
+fn tree_settings() -> [u64; 3] {
+    [crate::resource::texture_max_dim().unwrap_or(0), crate::pipeline::skipped_count(), crate::pipeline::denied_count()]
+}
+
+/// The process's working set, bytes.
+fn ram_bytes() -> u64 {
+    crate::host::bench_process_memory().1
+}
+
+fn device_removed() -> bool {
+    crate::bench::is_device_removed()
+}
+
+/// The fps of the slowest `pct` of the frames (ms, sorted ascending).
+fn low_pct_fps(sorted: &[f64], pct: f64) -> f64 {
+    crate::bench::low_pct_fps(sorted, pct)
+}
+
+/// Refuses a results folder inside a source checkout.
+fn outside_repo(dir: &std::path::Path) -> Result<(), String> {
+    crate::bench::ensure_outside_repo(dir)
+}
+
+fn encode_png(w: u32, h: u32, rgb: &[u8]) -> Vec<u8> {
+    crate::screenshot::encode_png(w, h, rgb)
+}
+
+// ---------------------------------------------------------------------------------------------
 
 /// How the run ends after the card (the title's own end: suspend, save the pipeline cache, exit).
 pub fn on_exit(f: fn()) {
@@ -191,8 +235,8 @@ fn summarize(ms: &[f64]) -> Summary {
         frames: n,
         avg: fps(total / n as f64),
         median: fps(median),
-        low1: crate::bench::low_pct_fps(&sorted, 0.01),
-        low5: crate::bench::low_pct_fps(&sorted, 0.05),
+        low1: low_pct_fps(&sorted, 0.01),
+        low5: low_pct_fps(&sorted, 0.05),
         min: windows.iter().copied().reduce(f64::min).unwrap_or_else(|| fps(total / n as f64)),
         max: windows.iter().copied().reduce(f64::max).unwrap_or_else(|| fps(total / n as f64)),
         pct12: if total > 0.0 { fast * 100.0 / total } else { 0.0 },
@@ -296,12 +340,13 @@ struct Settings {
 impl Settings {
     /// `drawn` and `asked`: draws run and asked for during the run's `frames`.
     fn read(frames: usize, drawn: u64, asked: u64) -> Settings {
+        let [texture_max_dim, skipped, denied] = tree_settings();
         Settings {
-            profile: if crate::console::current() == crate::console::Console::SeriesS { "S" } else { "X" },
+            profile: profile(),
             upscaler: if std::env::var_os("VICTORY_FSR_DLL").is_some_and(|v| !v.is_empty()) { "FSR" } else { "none" },
-            texture_max_dim: crate::resource::texture_max_dim().unwrap_or(0),
-            skipped: crate::pipeline::skipped_count(),
-            denied: crate::pipeline::denied_count(),
+            texture_max_dim,
+            skipped,
+            denied,
             draws_per_frame: if frames > 0 { drawn as f64 / frames as f64 } else { 0.0 },
             dropped_pct: if asked > 0 { asked.saturating_sub(drawn) as f64 * 100.0 / asked as f64 } else { 0.0 },
         }
@@ -366,7 +411,7 @@ fn finish(early: Option<&'static str>) {
     drop(r);
     let elapsed = START.get().map_or(Duration::ZERO, Instant::elapsed);
     let early = early.filter(|_| elapsed < RUN);
-    let removed = crate::bench::is_device_removed();
+    let removed = device_removed();
     let s = summarize(&ms);
     let (stamp, reason) = verdict(early.is_some(), elapsed.min(RUN), &s, black, removed);
     let now = counters();
@@ -406,7 +451,7 @@ fn finish(early: Option<&'static str>) {
         removed,
         compiled: [now[0].saturating_sub(base[0]), now[1].saturating_sub(base[1])],
         vram,
-        ram: crate::host::bench_process_memory().1,
+        ram: ram_bytes(),
         why: early.unwrap_or("5:00 reached"),
     };
     let mut doc = result_json(&card, &extra, &window_fps(&ms));
@@ -690,7 +735,7 @@ fn write_results(c: &Card, x: &Extra, json: &str) {
         tracing::warn!("KLBF Lab Bench: no folder for the results");
         return;
     };
-    if let Err(e) = crate::bench::ensure_outside_repo(&dir) {
+    if let Err(e) = outside_repo(&dir) {
         tracing::warn!(error = %e, "KLBF Lab Bench: results not written");
         return;
     }
@@ -714,7 +759,7 @@ fn write_results(c: &Card, x: &Extra, json: &str) {
 fn render_png(c: &Card) -> Vec<u8> {
     let bm = render_card(c, 1280, 820, false);
     let rgb: Vec<u8> = bm.px.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-    crate::screenshot::encode_png(bm.w as u32, bm.h as u32, &rgb)
+    encode_png(bm.w as u32, bm.h as u32, &rgb)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -973,6 +1018,33 @@ fn label_text(started: Option<Duration>) -> String {
     }
 }
 
+/// The game window's title during the run (the label may sit on another screen or behind a window;
+/// the title shows in the taskbar and on the window's own frame).
+fn title_text(started: Option<Duration>) -> String {
+    match started {
+        None => "KLBF Lab \u{b7} Bench waiting for the world".into(),
+        Some(d) => format!("KLBF Lab \u{b7} Bench {} / 5:00", mmss(d.min(RUN))),
+    }
+}
+
+/// Whether the bench owns the game window's title (from the start until the results): a caption
+/// with figures (FPS) stays off meanwhile.
+pub fn holds_title() -> bool {
+    active() && run().phase != Phase::Done
+}
+
+/// Sets `game`'s title without waiting on its thread for more than 200 ms (a title thread may not
+/// pump for a while). `buf` keeps the text alive until the next call.
+///
+/// # Safety
+/// `game` is a window handle (it may be gone).
+unsafe fn set_title(game: HWND, buf: &mut Vec<u16>, s: &str) {
+    *buf = wide(s);
+    let mut out = 0usize;
+    // SAFETY: a NUL-terminated text kept in `buf`.
+    unsafe { SendMessageTimeoutW(game, WM_SETTEXT, 0, buf.as_ptr() as isize, SMTO_ABORTIFHUNG, 200, &mut out) };
+}
+
 /// `s`, small, light on a semi-transparent dark pill.
 fn label(s: &str) -> Bitmap {
     let m = text(UI, 13.0, 0.0, s);
@@ -1028,6 +1100,11 @@ fn thread(game: HWND, adapter: Option<IDXGIAdapter3>) {
         let (mut f10, mut pressed, mut armed) = (false, false, false);
         let mut shown_secs = u64::MAX;
         let (born, mut label_tick) = (Instant::now(), u64::MAX);
+        // The game's own title, read without a message (its thread may be busy), put back after.
+        let mut normal = [0u16; 256];
+        let n = InternalGetWindowText(game, normal.as_mut_ptr(), normal.len() as i32).max(0) as usize;
+        let normal = String::from_utf16_lossy(&normal[..n]);
+        let (mut title_buf, mut title_back) = (Vec::new(), false);
         // The card at the client size, drawn once per size.
         let mut cache: Option<Bitmap> = None;
         let mut msg = std::mem::zeroed::<MSG>();
@@ -1038,6 +1115,10 @@ fn thread(game: HWND, adapter: Option<IDXGIAdapter3>) {
                 continue;
             }
             if let Some((card, at)) = CARD.get() {
+                if !title_back {
+                    title_back = true;
+                    set_title(game, &mut title_buf, &normal);
+                }
                 // Released first, then any press (or 60 s) closes.
                 let now = any_input(&mut pads, false);
                 if !armed {
@@ -1091,14 +1172,27 @@ fn thread(game: HWND, adapter: Option<IDXGIAdapter3>) {
             if START.get().is_some_and(|s| s.elapsed() >= RUN) {
                 finish(None);
             }
-            // The corner label, redrawn once a second at most.
+            // The title and the corner label, once a second at most.
             let tick = born.elapsed().as_secs();
             if tick != label_tick {
                 label_tick = tick;
+                let started = START.get().map(Instant::elapsed);
+                // Set every second (a caption thread of the host may have put its own back).
+                if holds_title() && IsWindow(game) != 0 {
+                    set_title(game, &mut title_buf, &title_text(started));
+                }
+                // Placed from the game window's own rectangle, read every time (it may sit on
+                // any screen, and move): its top-left, below the frame when the client starts
+                // inside it.
+                let mut rect = std::mem::zeroed::<RECT>();
                 let mut origin = POINT { x: 0, y: 0 };
-                if IsWindow(game) != 0 && IsIconic(game) == 0 && ours_in_front() && ClientToScreen(game, &mut origin) != 0 {
-                    let bm = label(&label_text(START.get().map(Instant::elapsed)));
-                    let at = POINT { x: origin.x + 12, y: origin.y + 12 };
+                if IsWindow(game) != 0 && IsIconic(game) == 0 && ours_in_front() && GetWindowRect(game, &mut rect) != 0 {
+                    let inside = ClientToScreen(game, &mut origin) != 0
+                        && (rect.left..rect.right).contains(&origin.x)
+                        && (rect.top..rect.bottom).contains(&origin.y);
+                    let corner = if inside { origin } else { POINT { x: rect.left, y: rect.top } };
+                    let bm = label(&label_text(started));
+                    let at = POINT { x: corner.x + 12, y: corner.y + 12 };
                     present(window, &bm, at);
                     SetWindowPos(window, HWND_TOPMOST, at.x, at.y, bm.w as i32, bm.h as i32, SWP_NOACTIVATE | SWP_SHOWWINDOW);
                 } else {
@@ -1527,6 +1621,13 @@ fn render_card_boxes(c: &Card, w: usize, h: usize, framed: bool) -> (Bitmap, Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_during_the_run() {
+        assert_eq!(title_text(None), "KLBF Lab \u{b7} Bench waiting for the world");
+        assert_eq!(title_text(Some(Duration::from_secs(133))), "KLBF Lab \u{b7} Bench 2:13 / 5:00");
+        assert_eq!(title_text(Some(Duration::from_secs(400))), "KLBF Lab \u{b7} Bench 5:00 / 5:00");
+    }
 
     #[test]
     fn figures_and_verdict() {

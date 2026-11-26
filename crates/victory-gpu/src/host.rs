@@ -8906,7 +8906,10 @@ impl Meter {
         // stays quiet while frames are slow or absent.
         static PENDING: Mutex<Option<(usize, String)>> = Mutex::new(None);
         static SETTER: std::sync::Once = std::sync::Once::new();
-        *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some((hwnd.0 as usize, text));
+        // (ours) A KLBF Lab Bench run owns the title meanwhile (no figures during it).
+        if !crate::klbf_bench::holds_title() {
+            *PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some((hwnd.0 as usize, text));
+        }
         SETTER.call_once(|| {
             let _ = std::thread::Builder::new()
                 .name("victory-caption".into())

@@ -1,7 +1,7 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab 63 — test build (26 Nov 2026)</h1>
+<h1 align="center">KLBF Lab 63.1 — test build (26 Nov 2026)</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-Lab%2063-1f46c8" alt="version: Lab 63">
+  <img src="https://img.shields.io/badge/version-Lab%2063.1-1f46c8" alt="version: Lab 63.1">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
   <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>
@@ -12,6 +12,10 @@
 KLBF Lab is a test build of a compatibility layer that runs an Xbox Series title natively on Windows from files you supply. It gathers the best fixes we could measure, aimed at **AMD Radeon (RDNA, 64-lane) cards**. This build is based on Neptune (Traffic & zm0kiemedia) plus contributors' fixes credited below, and our pipeline pre-build that survives AMD driver crashes.
 
 **No game files are included.** You need your own legally obtained copy. New to this? Follow the [beginner's guide](docs/GUIDE.md).
+
+**New in Lab 63.1:**
+- **Bench timer on any screen:** during a run the game window's title shows the time ("KLBF Lab · Bench 2:13 / 5:00", or "waiting for the world" before it), and the corner label follows the game window, also on a second monitor. The FPS caption stays off until the results.
+- **The bench for other projects:** [ADD-THE-BENCH.md](docs/klbf/ADD-THE-BENCH.md) shows a VIctory-derived project how to add it (files, 4 hooks, variables, credits); projects that add it are listed there.
 
 **New in Lab 63:**
 - **Bench BM-v1 built in:** `$env:KLBF_BENCH = 'bm-v1'` before `play.ps1` measures 5:00 from the first world frame with input locked (a small corner label only says it is running, no figures), then shows a certificate and saves it (PNG, JSON, text) in `bench-results` next to the exe, named `KLBF-Bench-BM-v1-YYYYMMDD-HHMM-<serial>`. Min and max are the slowest and fastest 1-second windows; the JSON also records the settings (profile, upscaler, texture cap, pipelines skipped and denied, draws per frame, dropped draws). Procedure and results board: [BM-v1](https://github.com/PastiiJay/klbf-lab/blob/main/docs/klbf/BENCH-BM-V1.md). Bench side of PR #78 by Vladimir-Human (its input record and replay is left out: the replay drifted).
