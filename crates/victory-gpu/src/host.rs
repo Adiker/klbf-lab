@@ -3657,6 +3657,7 @@ fn late_line(frames: f64) {
             );
         }
     }
+    crate::port::log(frames);
     if late_exact() {
         let [pages, runs, bytes, unwatched, unsaid, many, unsnapped] = crate::shadow::merged_stats().map(|n| n as f64 / frames);
         tracing::info!(
@@ -7447,6 +7448,7 @@ impl HostList {
                         add(C::CopyBytes, len as u64);
                     }
                     batch.title_written();
+                    crate::port::copied(dst, src, len);
                     let started = std::time::Instant::now();
                     copy_mapped(dst as *mut u8, src as *const u8, len, true);
                     // With the submission's one asking: the journal learns it.
@@ -7459,6 +7461,7 @@ impl HostList {
                         add(C::Copies, 1);
                         add(C::CopyBytes, len as u64);
                     }
+                    crate::port::filled(src, len);
                     if wide_fills {
                         batch.fills.push((dst, src, len));
                         continue;
