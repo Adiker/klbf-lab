@@ -4,7 +4,7 @@ Every KLBF Lab version, newest first. Measured on one machine: Windows 11, AMD R
 
 Product and controller names (Xbox, DualSense…) are only used to say what a build works with. They belong to their owners; KLBF Lab is not affiliated with or endorsed by them.
 
-## 2026-11-26: new test build on beta-2
+## 2026-11-26: Lab 61, new test build on beta-2
 
 - New test build on the `beta-2` branch: correct faces and hair, more frames per second, launcher `play.ps1` (`-LowMemory` for fewer freezes when memory fills).
 - A shared frame-rate measurement method for every project: `docs/klbf/MEASUREMENT.md`, with `tools/fps-session.py` (three tables and a one-line summary to share).
