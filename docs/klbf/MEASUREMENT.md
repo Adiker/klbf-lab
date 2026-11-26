@@ -21,7 +21,7 @@ Every project reports frame rates from different places and in different ways: a
 4. The machine: GPU and its memory, CPU, RAM, driver version, Windows version, console profile (Series S or X), upscaler, and the exact settings or launcher used.
 5. Known issues seen during the run (freezes, flicker, missing objects).
 
-Samples are one-second averages taken while the world is on screen (loading screens and menus excluded). With this project, [`tools/fps-session.py`](../../tools/fps-session.py) computes the three tables from the run's log.
+Samples are one-second averages taken while the world is on screen (loading screens and menus excluded). With this project, [`tools/fps-session.py`](../../tools/fps-session.py) computes the three tables from the run's log and prints one line to share. The session length comes from the log's own timestamps, and the line ends with the log's fingerprint: anyone you give the log to can rerun the tool and check that the line matches it.
 
 ## Rules
 
