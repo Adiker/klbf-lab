@@ -47,6 +47,8 @@ pub(crate) struct Staging {
     /// read for it and the smaller ones.
     first: u32,
     size: usize,
+    /// Title mip corresponding to mip zero in the host copy.
+    first_mip: u32,
     /// The staging buffer's bytes (counted in `STAGED` while it lives).
     bytes: u64,
     memory: *const u8,
@@ -1283,6 +1285,8 @@ impl Staging {
         }
         for (i, (footprint, &rows)) in self.footprints.iter().zip(&self.rows).enumerate() {
             let (mip, slice) = self.part(i);
+            // The title's level: a capped host copy starts later in the chain.
+            let mip = mip + self.first_mip;
             let f = footprint.Footprint;
             let pitch = f.RowPitch as usize;
             let len = pitch * rows as usize * f.Depth as usize;
@@ -1598,6 +1602,10 @@ fn staging(resource: This, texture: &ID3D12Resource, first: u32) -> Option<Arc<S
     // (Neptune) A texture made level by level stages every level (zeros for the ones the
     // title does not hold): its upload gives the card's memory by the same answer.
     let first = if on_demand { 0 } else { first };
+    // A capped host copy (`VICTORY_TEXTURE_MAX_DIM`) lacks the title's largest
+    // levels: its levels are not the title's by number, so it stages them all.
+    let first_mip = crate::resource::first_host_mip(resource, texture).map_or(0, |(first, _)| first);
+    let first = if first_mip > 0 { 0 } else { first };
     let mut map = STAGING.lock().unwrap_or_else(|e| e.into_inner());
     let map = map.get_or_insert_with(HashMap::new);
     if let Some(s) = map.get(&(resource as usize))
@@ -1664,6 +1672,7 @@ fn staging(resource: This, texture: &ID3D12Resource, first: u32) -> Option<Arc<S
         mips: u32::from(d.MipLevels),
         first,
         size,
+        first_mip,
         bytes: total,
         memory,
         last: Mutex::default(),
@@ -1723,6 +1732,43 @@ mod first_mip_tests {
 #[cfg(test)]
 mod title_memory_tests {
     use super::with_title;
+
+    #[test]
+    #[ignore = "requires VICTORY_TEXTURE_MAX_DIM=512 and a D3D12 device"]
+    fn capped_placed_texture_stages_the_retained_title_mip() {
+        use crate::resource::{first_host_mip, host_resource, placed_bytes, texture_at};
+
+        let mut desc = [0u32; 14];
+        desc[0] = 3; // TEXTURE2D
+        desc[4] = 1024; // width
+        desc[6] = 512; // height
+        desc[7] = (2 << 16) | 1; // two mips, one layer
+        desc[8] = 71; // BC1_UNORM
+        desc[9] = 1; // sample count
+        desc[11] = 1; // linear layout
+        let size = placed_bytes(&desc).unwrap() as usize;
+        // Placed views remember their title address for the life of the process.
+        let data = Box::leak(vec![0x11; size].into_boxed_slice());
+        let resource = texture_at(data.as_ptr() as u64, &desc).unwrap();
+        let texture = host_resource(resource).expect("make the capped host copy");
+        assert_eq!(first_host_mip(resource, texture), Some((1, 1)));
+        // SAFETY: a live host resource.
+        let shape = unsafe { texture.GetDesc() };
+        assert_eq!((shape.Width, shape.Height, shape.MipLevels), (512, 256, 1));
+
+        let staging = super::staging(resource, texture, 0).expect("get host staging footprints");
+        let first = staging.footprints[0];
+        let pitch = first.Footprint.RowPitch as usize;
+        let bytes = pitch * staging.rows[0] as usize;
+        staging.layout.tile(data, 1, 0, &vec![0x55; bytes], pitch, bytes).unwrap();
+        staging.detile(data);
+        // SAFETY: the retained level has this mapped range in the staging buffer.
+        let staged = unsafe { staging.data.add(first.Offset as usize) };
+        assert_eq!(unsafe { *staged }, 0x55);
+        assert_eq!(unsafe { *staged.add(bytes - 1) }, 0x55);
+        super::unstage(resource);
+    }
+
 
     /// Title memory whose tail is reserved and not committed reads through
     /// the copy as its bytes and then zeros, without a fault; so does
