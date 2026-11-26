@@ -37,18 +37,18 @@ Lab 61, a new test build on the **[`beta-2` branch](https://github.com/PastiiJay
 | Driving fast through streets (the world streams in) | up to 12 |
 
 <!-- live-start -->
-**Stability index**: how the frame rate is spread over a real play session still running, **35 minutes so far without a crash** (376 samples, on foot and driving; updated every 5 minutes of play):
+**Stability index**: how the frame rate is spread over a real play session of **37 minutes without a crash** (385 samples, on foot and driving):
 
 | fps | Share of the time |
 |---|---|
-| 18 and more | 15 % |
+| 18 and more | 16 % |
 | 15–18 | 28 % |
-| 12–15 | 31 % |
+| 12–15 | 30 % |
 | 9–12 | 15 % |
 | 5–9 | 5 % |
 | under 5 (freezes) | 6 % |
 
-**Average performance index**, same session: average 13.9 fps, median 14.5, 5 % low 1.7, 1 % low 0.4 (the lows are the freezes).
+**Average performance index**, same session: average 14.0 fps, median 14.5, 5 % low 1.8, 1 % low 0.4 (the lows are the freezes).
 <!-- live-end -->
 
 Known issues:
