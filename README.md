@@ -15,16 +15,18 @@ No cherry-picked numbers: these come from ordinary play, not from a quiet scene 
 
 | Situation | fps |
 |---|---|
-| Standing still, looking at the sky | 20–23, peaks at 27 |
-| On foot in a quiet area (by a lake or a river) | 16–21, peaks at 23 |
-| Standing still in traffic, busy neighbourhood | 15–17 |
-| On foot on a motorway slip road | 15–16 |
+| Standing still, looking at the sky | up to 27 |
+| On foot in a quiet area (by a lake or a river) | up to 23 |
+| Standing still in traffic, busy neighbourhood | up to 17 |
+| On foot on a motorway slip road | up to 16 |
 | On foot in a busy neighbourhood | up to 14 |
 | Driving over a bridge above water | up to 17 |
 | Driving a truck at moderate speed | up to 15 |
-| Driving fast through streets (the world streams in) | 9–12, short dips while new areas load |
+| Driving fast through streets (the world streams in) | up to 12 |
 
-Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable.
+Lowest seen in every situation, outside freezes: 9 fps.
+
+Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable. We are working on them now.
 
 Route: start at the male lead's house right after first arriving there (~3% progress), then a lap of his neighbourhood. One machine only: other cards and drivers may behave differently. Full log: [docs/klbf/results.md](docs/klbf/results.md).
 
