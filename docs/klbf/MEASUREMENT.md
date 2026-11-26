@@ -8,12 +8,17 @@ Every project reports frame rates from different places and in different ways: a
 
 ### Keep your morning save
 
-The game has one automatic save plus 15 manual slots (16 in all). Make the morning save **in a manual slot** and note its number (for example slot 3): the automatic save is overwritten as soon as you play on, a manual slot is not.
+The game has one automatic save plus 15 manual slots. The two menus don't show the same list:
+
+- **Save** shows only the 15 manual slots (the automatic save never appears there).
+- **Load** shows the automatic save at the top, then the manual slots: up to 16 entries.
+
+So count slots the way each menu shows them. Make the morning save **in a manual slot** and note its number in the Save menu (for example slot 3); in the Load menu the same save appears one line lower, under the automatic one. The automatic save is overwritten as soon as you play on, a manual slot is not.
 
 All 16 live together in one `saves` folder, inside the data folder you set with `VICTORY_DATA_DIR`, in `<title id>\saves` (the title id is the folder with an 8-character hex name). Copying that folder keeps both the automatic save and your numbered slot:
 
 1. Right after making the morning save, quit the game and copy the `saves` folder somewhere safe, for example `D:\benchmark-morning`.
-2. Before each measured run: quit the game, put your copy back in place of the `saves` folder, start the game, then **Load** and pick the slot number you noted. (Continue would load the automatic save instead.)
+2. Before each measured run: quit the game, put your copy back in place of the `saves` folder, start the game, then **Load** and pick your slot (one line below its Save-menu number, because the automatic save comes first). Continue would load the automatic save instead.
 
 In PowerShell (put your own title id in place of `<title id>`):
 
