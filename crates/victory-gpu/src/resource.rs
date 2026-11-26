@@ -1357,6 +1357,47 @@ fn texture_max_dim() -> Option<u64> {
     })
 }
 
+/// Whether textures that look like flat screen images keep their full size
+/// under `VICTORY_TEXTURE_MAX_DIM`. On by default;
+/// `VICTORY_TEXTURE_MAX_DIM_KEEP_UI=0` caps them too. Single-level textures
+/// are never capped either way.
+#[cfg(windows)]
+fn keep_ui() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_MAX_DIM_KEEP_UI").is_none_or(|v| v != "0"))
+}
+
+/// A side that is not a power of two (1920x1080, 1280x720...): loading
+/// screens, menus and other flat images; world textures are powers of two.
+// ponytail: size-only guess; a power-of-two menu image is still capped.
+fn looks_like_ui(width: u64, height: u32) -> bool {
+    !width.is_power_of_two() || !height.is_power_of_two()
+}
+
+/// Textures kept at full size by [`keep_ui`], and the second last logged.
+#[cfg(windows)]
+static UI_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(windows)]
+fn count_ui_kept() {
+    use std::sync::atomic::Ordering::Relaxed;
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    static LOGGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let kept = UI_KEPT.fetch_add(1, Relaxed) + 1;
+    let second = START.get_or_init(std::time::Instant::now).elapsed().as_secs() + 1;
+    if LOGGED.swap(second, Relaxed) != second {
+        tracing::info!("texture cap: {kept} kept full size as UI");
+    }
+}
+
+#[test]
+fn ui_guess() {
+    assert!(looks_like_ui(1920, 1080));
+    assert!(looks_like_ui(1280, 720));
+    assert!(!looks_like_ui(1024, 512));
+    assert!(!looks_like_ui(2048, 2048));
+}
+
 /// A host description that starts later in the title's mip chain. These
 /// shapes are used only for resources synthesized for placed shader views.
 #[cfg(windows)]
@@ -1447,6 +1488,10 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             && clear.is_null()
             && let Some(limit) = texture_max_dim()
             && let Some(compact) = capped_texture(&r.desc, limit)
+            && !(keep_ui() && looks_like_ui(r.desc.width, r.desc.height) && {
+                count_ui_kept();
+                true
+            })
         {
             texture = host_texture(&compact, r.host.state, clear);
         }
