@@ -9,9 +9,10 @@ Every project reports frame rates from different places and in different ways: a
 ## What to play: the standard drive
 
 1. Load the morning save in the male lead's house.
-2. Open the map and set the GPS to the first objective the game offers at that point (it proposes two markers; take the first story one, the errand that sends you across the neighbourhood).
-3. Walk out to his car and drive there by the GPS route, as you normally would.
-4. Stop the measurement once you are parked at the marker.
+2. Walk out to his car and get in. The game then asks you, for the first time, to open the map (the View button on an Xbox controller).
+3. In the map, press right on the D-pad to cycle through the story objectives. Three are offered; pick the closest one, with the **dollar ($) icon** (about 0.64 miles away): the errand about collecting money that is owed. Set the marker on it.
+4. Drive there by the GPS route, as you normally would.
+5. Stop the measurement once you are parked at the marker.
 
 Why this route: it comes very early in the game, so anyone can reach it quickly; loading it is one of the fastest loads (you start inside the house, with no cutscene); and the drive crosses streets, junctions and busy blocks, which is where frame rates really drop. Everyone driving the same route gives numbers that can be compared.
 
