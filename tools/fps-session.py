@@ -12,13 +12,22 @@ a = ap.parse_args()
 ansi = re.compile(r'\x1b\[[0-9;]*m')
 from datetime import datetime
 v, t = [], []
+bad = 0
 for line in open(a.log, encoding='utf8', errors='ignore'):
     line = ansi.sub('', line)
-    m = re.search(r' ([0-9.]+) fps,.*?(\d+) draws/frame', line)
-    if m and int(m.group(2)) >= 1000:
-        v.append(float(m.group(1)))
+    m = re.search(r' ([0-9.]+) fps, ([0-9.]+) ms/frame.*?(\d+) draws/frame', line)
+    if m and int(m.group(3)) >= 1000:
+        fps, ms = float(m.group(1)), float(m.group(2))
+        # Each line carries both the rate and the frame time: an edited rate no longer matches its frame time.
+        if ms > 0 and abs(fps - 1000 / ms) > max(0.6, 0.08 * fps):
+            bad += 1
+        v.append(fps)
         ts = re.match(r'(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)', line)
-        if ts: t.append(datetime.fromisoformat(ts.group(1)))
+        if ts:
+            d = datetime.fromisoformat(ts.group(1))
+            if t and d < t[-1]:
+                bad += 1  # time going backwards: lines moved or pasted
+            t.append(d)
 if not v:
     raise SystemExit('no world samples found')
 s = sorted(v); n = len(s)
@@ -29,12 +38,12 @@ digest = hashlib.sha256(open(a.log, 'rb').read()).hexdigest()[:16]
 r = {'method': 'KLBF Lab shared measurement (docs/klbf/MEASUREMENT.md)', 'build': a.build, 'gpu': a.gpu, 'cpu': a.cpu,
      'minutes': round((t[-1] - t[0]).total_seconds() / 60, 1) if len(t) > 1 else 0, 'average': round(sum(v) / n, 1), 'median': s[n // 2], 'low_5pct': low(5), 'low_1pct': low(1),
      'peak': s[-1], 'stability_index_pct': spread, 'samples': n,
-     'from_utc': t[0].isoformat() if t else '', 'to_utc': t[-1].isoformat() if t else '', 'log_sha256_16': digest}
+     'from_utc': t[0].isoformat() if t else '', 'to_utc': t[-1].isoformat() if t else '', 'log_sha256_16': digest, 'consistency': 'ok' if bad == 0 else f'{bad} lines do not add up'}
 print(f"Average performance index: average {r['average']} fps, median {r['median']}, 5 % low {r['low_5pct']}, 1 % low {r['low_1pct']} ({n} samples, {r['minutes']} min)")
 print('Stability index: ' + ', '.join(f'{k} {p} %' for k, p in spread.items()))
 share = (f"[KLBF benchmark] {a.build} | {a.gpu} | {a.cpu} | {r['minutes']} min real play | avg {r['average']} fps, "
          f"median {r['median']}, 1% low {r['low_1pct']}, peak {r['peak']} | time at 12+ fps: {spread['18+'] + spread['15-18'] + spread['12-15']} % "
-         f"| {n} samples {r['from_utc'][11:16]}-{r['to_utc'][11:16]} UTC | log {digest}")
+         f"| {n} samples {r['from_utc'][11:16]}-{r['to_utc'][11:16]} UTC | log {digest} | check {r['consistency']}")
 print('\nShare this line:\n' + share)
 json.dump(r, open(a.out, 'w', encoding='utf8'), indent=2)
 print(f'\nSaved {a.out}')
