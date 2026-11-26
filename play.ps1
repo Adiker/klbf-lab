@@ -2,13 +2,15 @@
 #   .\play.ps1 -Prebuild        once after each build: pre-builds every pipeline (rerun by itself after a driver crash)
 #   .\play.ps1                  play
 # Options: -GameDir <folder with the title's files>, -Exe <the title's exe, default: the largest .exe there>,
-#          -FfxDir <FidelityFX SDK signedbin folder>, -SeriesX (Series X mode, no FSR needed).
+#          -FfxDir <FidelityFX SDK signedbin folder>, -SeriesX (Series X mode, no FSR needed),
+#          -LowMemory (textures capped at 512 px: fewer freezes when the card or PC memory is full, softer textures).
 param(
   [string]$GameDir = 'C:\Games\Title',
   [string]$Exe = '',
   [string]$FfxDir = 'C:\FidelityFX-SDK\Kits\FidelityFX\signedbin',
   [switch]$Prebuild,
-  [switch]$SeriesX
+  [switch]$SeriesX,
+  [switch]$LowMemory
 )
 $ErrorActionPreference = 'Stop'
 $victory = Join-Path $PSScriptRoot 'target\release\victory.exe'
@@ -37,7 +39,9 @@ $set = [ordered]@{
   VICTORY_WATCH_4K = '1'; VICTORY_THIN = '1'
   VICTORY_CLAMP_AFTER_WRITER = '1'
   VICTORY_PORT_CONSTANTS = '1'; VICTORY_PORT_DESCRIPTORS = '1'
+  VICTORY_DYNAMIC_SLOTS = '786432'
 }
+if ($LowMemory) { $set['VICTORY_TEXTURE_MAX_DIM'] = '512' }
 $console = @()
 $fsr = Join-Path $FfxDir 'amd_fidelityfx_upscaler_dx12.dll'
 if (-not $SeriesX) {

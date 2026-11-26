@@ -7,7 +7,9 @@ Product and controller names (Xbox, DualSense…) are only used to say what a bu
 ## Test build `beta-2` — 26 Nov 2026
 - **Base:** Neptune 2026-11-25m (Traffic & zm0kiemedia) with WillyboPeep's changes, face fixes (proneonn, tippythetaidum), fxceless/victory-fork#1216 (GamingRipperDoc) and #1213 (IxMxAMAR, MalfoyDraco99), zm0kiemedia's clamps and avatarmanz's renderer port 1 and 2.
 - **Ours:** the crash-surviving pipeline pre-build and skip list, KLBF Lab names, `play.ps1` with our measured settings.
-- **Result on RX 9070 XT, Series S + FSR:** about 20 fps in the first room, clean picture with no flashing in real play, no crash in our runs (stopped by our script). `VICTORY_PASSES_AHEAD=0` is no longer set: about 3 fps more, but vegetation and shadows flash for a frame.
+- **New:** `VICTORY_DYNAMIC_SLOTS=786432` set by default (about 37 draws a frame were dropped for lack of descriptor slots: flicker fixed); `-LowMemory` switch sets `VICTORY_TEXTURE_MAX_DIM=512` (Evan-Lowry's texture cap: fewer freezes when memory is full, softer textures).
+- **Result on RX 9070 XT, Series S + FSR 4, real play with a controller:** 20–23 fps standing still looking at the sky, 15–17 in traffic, up to 14 on foot in the open world (varies with the area), 9–12 driving fast with short dips while new areas load. Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable. `VICTORY_PASSES_AHEAD` stays at its default (=0 made vegetation and shadows flash).
+- **Known issues:** occasional freezes when memory fills (`-LowMemory`), some shadows flicker near trees, mirrors stay black (need ray tracing), car windows (glass) are not drawn, Series S resolution upscaled.
 
 ## Lab 39 (test) — 25 Nov 2026
 - **Water physics fixed:** the ocean height map the GPU computes is copied back into the game's memory (from Geckomacabre/vx-layer), and XOR swizzle modes are addressed (from MiamiGame/XTP, Mesa addrlib tables). Boats float and move.
