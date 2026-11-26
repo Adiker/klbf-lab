@@ -12,10 +12,11 @@ itself: you load one save, press Continue and touch nothing. Results: [Bayside M
 
 ## Make the save (once)
 
-1. At the male lead's house, sleep in his bed until the morning.
-2. Get dressed.
-3. Go down to the workshop and take the fishing book.
-4. Save in **slot 1**, then quit.
+1. Sleep until the morning at the male lead's house.
+2. Go down to the laundry room (the one with the washing machine), pick up the fishing book on the
+   workbench and keep it in hand.
+3. Press Start, then save in **slot 1**.
+4. Each run: **Continue**, then don't touch anything.
 
 Every run starts from this save, so the time of day, the light and the scene are the same for
 everyone. Keep a copy of it as described in [MEASUREMENT.md](MEASUREMENT.md#keep-your-morning-save),
