@@ -2074,6 +2074,9 @@ fn install() {
             if ahead > 1 {
                 open(&mut g, block + BLOCK, block + ahead * BLOCK);
             }
+            drop(g);
+            // Renderer port #2's fallback says who wrote a block of the heap.
+            crate::port_descriptors::faulted(at, r.ExceptionAddress as usize);
             count(0, 1);
             #[cfg(feature = "diagnostics")]
             crate::copystat::add(crate::copystat::C::GuardFaults, 1);

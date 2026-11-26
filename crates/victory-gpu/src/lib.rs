@@ -50,6 +50,8 @@ mod indirect;
 mod inplace;
 #[cfg(windows)]
 mod port;
+#[cfg(windows)]
+pub mod port_descriptors;
 pub mod list;
 pub mod object;
 pub mod pipeline;
