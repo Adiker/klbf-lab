@@ -28,7 +28,7 @@ body:
     id: result
     attributes:
       label: Result JSON
-      description: Paste the content of `KLBF-Bench-BM-v1-<serial>.json`, or drag the file here.
+      description: "Paste the WHOLE `KLBF-Bench-BM-v1-…json` file from `bench-results` exactly as the game wrote it (about 3 KB). Do not edit, shorten or summarize it, and do not ask an AI to rewrite it: the serial is checked against every field, so any change makes the run invalid."
       render: json
     validations:
       required: true
