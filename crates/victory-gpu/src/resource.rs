@@ -2114,15 +2114,53 @@ pub(crate) fn let_go_idle() {
     // Under pressure (`VICTORY_VRAM_EVICT`): the least recently used copies
     // that are idle by the shorter measure go, enough to get under it.
     let pressed = pressure_victims(video);
+    // `VICTORY_TEXTURE_LRU=1` (after samishating, AKA0GHOST/victory-fork
+    // e3aa169 and 7daa701): idle copies go oldest first, only as many bytes
+    // as bring the card under `VICTORY_TEXTURE_KEEP_PERCENT` of its budget
+    // (default 5 points under the room share), and any copy idle for
+    // `LONG_MS`. Without it every idle copy goes under pressure, and one off
+    // screen for a moment at 2-3 fps is uploaded again when it comes back.
+    // Off by default.
+    const LONG_MS: u64 = 30_000;
+    static LRU: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let lru = *LRU.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_LRU").is_some_and(|v| v == "1"));
+    static KEEP: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let keep = *KEEP.get_or_init(|| {
+        std::env::var("VICTORY_TEXTURE_KEEP_PERCENT")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .map_or(room_percent().saturating_sub(5), |p| p.clamp(40, room_percent()))
+    });
+    let mut over = match video {
+        Some([budget, used, ..]) if lru => excess(budget, used, keep),
+        _ => u64::MAX,
+    };
     // For the trail (`crate::host::trail`): how many went, their bytes,
     // and the first one.
     let (mut went, mut bytes, mut first) = (0u64, 0u64, None);
     let all = textures();
-    for &at in all.iter() {
+    let mut order: Vec<(u64, usize)> = all
+        .iter()
+        .map(|&at| {
+            // SAFETY: as below.
+            let r = unsafe { &*(at as *const Resource) };
+            (r.host.used.load(Relaxed), at)
+        })
+        .collect();
+    if lru {
+        order.sort_unstable_by_key(|&(used, _)| used);
+    }
+    for &(_, at) in order.iter() {
         // SAFETY: a texture leaves the table before it is freed, under the
         // lock held here (`Drop for Resource`).
         let r = unsafe { &*(at as *const Resource) };
         if !fills(&r.desc) || crate::texture::host_wrote(at) {
+            continue;
+        }
+        if over == 0
+            && pressed.binary_search(&at).is_err()
+            && !crate::host::long_ago(r.host.used.load(Relaxed), LONG_MS, IDLE_FRAMES)
+        {
             continue;
         }
         let gone = {
@@ -2156,6 +2194,7 @@ pub(crate) fn let_go_idle() {
             }
             went += 1;
             bytes += host.bytes;
+            over = over.saturating_sub(host.bytes);
             if first.is_none() {
                 first = Some(at);
             }
