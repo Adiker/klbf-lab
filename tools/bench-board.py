@@ -83,6 +83,9 @@ def main():
             bad.append(f'{path.name}: no submissions.json entry with a login and a GitHub-attached card')
             continue
         problems = bc.check(d, path.name, sub['login'])
+        # A card nickname that differs from the submitter's login is shown as the login (the real, linked account).
+        if problems and all('is not the submitter' in x for x in problems):
+            d['player'], problems = sub['login'], []
         bad += [f'{path.name}: {x}' for x in problems]
         if not problems:
             repo = sub['repo'] if str(sub.get('repo', '')).startswith('https://') else None

@@ -23,3 +23,9 @@ records about quality.
 | Player | Project | GPU | CPU | RAM | avg | median | 1 % low | ≥ 12 fps % | Settings | date | proof |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | [PastiiJay](https://github.com/PastiiJay) (reference run — KLBF Lab test machine) | [PastiiJay/klbf-lab@a0687b7](https://github.com/PastiiJay/klbf-lab/tree/a0687b7) | AMD Radeon RX 9070 XT 16 GB | AMD Ryzen 7 9800X3D 8-Core Processor | 31 GB | 14.3 | 17.0 | 3.6 | 70.2 | profile S · FSR · textures ≤ 1024 px · 1 pipelines skipped · 0 pipelines denied · 8701.03 draws/frame · 0.0 % draws dropped | 2026-11-26 | [JSON](bench/bm-v1/KLBF-Bench-BM-v1-20261126-1653-5096b690.json) · [card](https://github.com/user-attachments/assets/c973f94d-651b-4feb-a90f-bdc82e23f5d0) |
+
+## NVIDIA
+
+| Player | Project | GPU | CPU | RAM | avg | median | 1 % low | ≥ 12 fps % | Settings | date | proof |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| [vShotv](https://github.com/vShotv) | [PastiiJay/klbf-lab@bedecd6](https://github.com/PastiiJay/klbf-lab/tree/bedecd6) | NVIDIA GeForce RTX 4070 12 GB | AMD Ryzen 5 7600 6-Core Processor | 31 GB | 8.3 | 8.9 | 2.4 | 11.5 | profile X · none · textures ≤ 1024 px · 48 pipelines skipped · 0 pipelines denied · 6457.02 draws/frame · 0.65 % draws dropped | 2026-11-26 | [JSON](bench/bm-v1/KLBF-Bench-BM-v1-20261126-2011-eb51f9b4.json) · [card](https://github.com/user-attachments/assets/f3299aa6-89af-46b1-91a2-b7288f44b22f) |
