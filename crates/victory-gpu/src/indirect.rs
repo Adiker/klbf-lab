@@ -1216,7 +1216,6 @@ void main() {
     /// whose mask bit is set go from the one buffer to the other, and no
     /// other byte of those blocks or of the blocks beside them is written.
     #[test]
-    #[ignore = "fails on beta-2 since the Neptune 2026-11-25l import (never built before): the test or the code is to be fixed"]
     fn warp_card_patch_writes_the_masked_bytes_and_no_others() {
         let Some(mut warp) = WarpHarness::new() else {
             return;
@@ -1240,9 +1239,13 @@ void main() {
             std::ptr::write_bytes(masks_ptr, 0xff, 4096);
             std::ptr::copy_nonoverlapping(crate::host::block_mask(1, &first).as_ptr(), masks_ptr.add(1024), 512);
             std::ptr::copy_nonoverlapping(crate::host::block_mask(2, &second).as_ptr(), masks_ptr.add(1536), 512);
+            // A table entry contains the byte offset of a block and its mask. Put the
+            // second block first so the test also checks that the shader follows the table.
+            let table = [(2 * BLOCK) as u32, 1536, BLOCK as u32, 1024];
+            std::ptr::copy_nonoverlapping(table.as_ptr(), masks_ptr.add(2048).cast::<u32>(), table.len());
             warp.list.SetComputeRootSignature(&patch.root);
             warp.list.SetPipelineState(&patch.pso);
-            let constants = [BLOCK as u32, 1024u32];
+            let constants = [2048u32, 2];
             warp.list.SetComputeRoot32BitConstants(0, 2, constants.as_ptr().cast(), 0);
             warp.list.SetComputeRootShaderResourceView(1, from_gpu);
             warp.list.SetComputeRootShaderResourceView(2, masks_gpu);
@@ -1268,7 +1271,6 @@ void main() {
     /// its slot; an unflagged piece's entry says so; a ticket past the
     /// slots is written but copies nothing.
     #[test]
-    #[ignore = "fails on beta-2 since the Neptune 2026-11-25l import (never built before): the test or the code is to be fixed"]
     fn warp_card_fetch_copies_flagged_pieces_to_their_slots() {
         use crate::host::{CARD_COMPARE, CARD_FETCH, INFLIGHT_NONE, INFLIGHT_SLOT};
         let Some(mut warp) = WarpHarness::new() else {
@@ -1306,7 +1308,9 @@ void main() {
                 warp.list.SetComputeRootShaderResourceView(1, now_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(2, hashes_gpu);
                 warp.list.SetComputeRootUnorderedAccessView(3, differs_gpu);
-                warp.list.Dispatch(1, 1, 1);
+                // The compare dispatch hashes one piece per group. The fetch below
+                // uses its own group count and loops over the four resulting flags.
+                warp.list.Dispatch(pieces, 1, 1);
                 if mode == 2 {
                     warp.list.ResourceBarrier(&[uav_barrier()]);
                     warp.list.SetComputeRootSignature(&fetch.root);
