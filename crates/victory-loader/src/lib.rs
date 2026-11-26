@@ -26,6 +26,7 @@ mod console_insn;
 mod crash;
 #[cfg(windows)]
 pub mod descriptor_sites;
+mod movies;
 pub mod prepare;
 pub mod resolve;
 #[cfg(all(windows, feature = "diagnostics"))]
