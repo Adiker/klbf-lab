@@ -954,6 +954,24 @@ unsafe extern "system" fn proc(hwnd: HWND, msg: u32, wp: usize, lp: isize) -> is
     }
 }
 
+/// The corner label during the run: text only, no figures, so it cannot sway the run.
+fn label_text(started: Option<Duration>) -> String {
+    match started {
+        None => "KLBF Lab Bench \u{b7} waiting for the world".into(),
+        Some(d) => format!("KLBF Lab Bench \u{b7} in progress {} / 5:00", mmss(d.min(RUN))),
+    }
+}
+
+/// `s`, small, light on a semi-transparent dark pill.
+fn label(s: &str) -> Bitmap {
+    let m = text(UI, 13.0, 0.0, s);
+    let (w, h) = (m.w + 16, m.h + 8);
+    let mut bm = Bitmap::new(w, h);
+    bm.fill_round((0, 0, w, h), 6.0, [16, 12, 20], 110);
+    paint(&mut bm, &m, 8, 4, 190, [230, 225, 235]);
+    bm
+}
+
 fn thread(game: HWND, adapter: Option<IDXGIAdapter3>) {
     let _ = SYS.set(read_sys(adapter.as_ref()));
     *ADAPTER.lock().unwrap_or_else(|e| e.into_inner()) = adapter;
@@ -998,6 +1016,7 @@ fn thread(game: HWND, adapter: Option<IDXGIAdapter3>) {
         let mut pads = Pads([None; 4]);
         let (mut f10, mut pressed, mut armed) = (false, false, false);
         let mut shown_secs = u64::MAX;
+        let (born, mut label_tick) = (Instant::now(), u64::MAX);
         // The card at the client size, drawn once per size.
         let mut cache: Option<Bitmap> = None;
         let mut msg = std::mem::zeroed::<MSG>();
@@ -1060,6 +1079,20 @@ fn thread(game: HWND, adapter: Option<IDXGIAdapter3>) {
             // A game that stops presenting still ends at 5:00.
             if START.get().is_some_and(|s| s.elapsed() >= RUN) {
                 finish(None);
+            }
+            // The corner label, redrawn once a second at most.
+            let tick = born.elapsed().as_secs();
+            if tick != label_tick {
+                label_tick = tick;
+                let mut origin = POINT { x: 0, y: 0 };
+                if IsWindow(game) != 0 && IsIconic(game) == 0 && ours_in_front() && ClientToScreen(game, &mut origin) != 0 {
+                    let bm = label(&label_text(START.get().map(Instant::elapsed)));
+                    let at = POINT { x: origin.x + 12, y: origin.y + 12 };
+                    present(window, &bm, at);
+                    SetWindowPos(window, HWND_TOPMOST, at.x, at.y, bm.w as i32, bm.h as i32, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                } else {
+                    ShowWindow(window, SW_HIDE);
+                }
             }
         }
     }
