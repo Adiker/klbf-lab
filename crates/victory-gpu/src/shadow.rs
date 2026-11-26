@@ -251,7 +251,7 @@ static FLAGGED: Mutex<Vec<std::sync::Weak<Shadow>>> = Mutex::new(Vec::new());
 
 fn flagged_line() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_FLAGGED").is_none_or(|v| v != "0"))
+    *ON.get_or_init(|| std::env::var_os("VICTORY_CARD_FLAGGED").map_or(!crate::host::rdna2_safe_defaults(), |v| v != "0"))
 }
 
 /// (Neptune) `shadow` is shared from now on: if it has a card side it is among [`CARDED`],
@@ -805,7 +805,7 @@ pub(crate) fn relay() -> bool {
     // The crate's own tests run without it unless they ask: several of
     // them look at title memory right after a submission, which the
     // relay's landing thread may still be writing.
-    *ON.get_or_init(|| std::env::var("VICTORY_RELAY").map_or(!cfg!(test), |v| v == "1" || v == "2") && !keeps())
+    *ON.get_or_init(|| std::env::var("VICTORY_RELAY").map_or(!cfg!(test) && !crate::host::rdna2_safe_defaults(), |v| v == "1" || v == "2") && !keeps())
 }
 
 /// The submission being prepared (its number among those started): what

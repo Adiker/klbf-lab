@@ -117,7 +117,7 @@ pub(crate) fn passes_ahead() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| match std::env::var("VICTORY_PASSES_AHEAD") {
         Ok(v) => v.trim() != "0",
-        Err(_) => crate::list::thin::wanted(),
+        Err(_) => crate::list::thin::wanted() && !crate::host::rdna2_safe_defaults(),
     })
 }
 

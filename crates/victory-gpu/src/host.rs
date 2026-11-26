@@ -793,6 +793,37 @@ pub(crate) fn is_amd() -> bool {
     host().is_some_and(|h| h.is_amd())
 }
 
+/// Whether a DXGI adapter (vendor, device id) is an AMD RDNA 2 card (Navi 2x,
+/// RX 6000 series). Device ids: Navi 21 0x73A0-0x73BF, Navi 22 0x73C0-0x73DF,
+/// Navi 23 0x73E0-0x73FF, and Navi 24 0x7420-0x743F (RX 6500 XT / 6400 are
+/// 0x743F, outside 0x73A0-0x73FF). RDNA 3 starts at 0x7440 (Navi 31) and RDNA 4
+/// (RX 9070 XT, Navi 48) is 0x7550, so neither matches. RDNA 2 APUs (0x163F,
+/// 0x1681, 0x164E) are not counted.
+pub(crate) fn is_rdna2(vendor: u32, device: u32) -> bool {
+    vendor == 0x1002 && matches!(device, 0x73A0..=0x73FF | 0x7420..=0x743F)
+}
+
+/// Whether the host adapter is RDNA 2, where `VICTORY_AHEAD_FIRST`,
+/// `VICTORY_CARD_FLAGGED`, `VICTORY_PASSES_AHEAD` and `VICTORY_RELAY` lose the
+/// device 25-72 s in (bisected to a5f5a75, issue #52): when unset, they default
+/// to 0 there. An explicit value always wins. Not in the crate's tests, which
+/// would otherwise make a device just to read a default.
+pub(crate) fn rdna2_safe_defaults() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = !cfg!(test)
+            && host()
+                .and_then(|h| h.adapter.as_ref())
+                // SAFETY: a plain DXGI adapter query.
+                .and_then(|a| unsafe { a.GetDesc1() }.ok())
+                .is_some_and(|d| is_rdna2(d.VendorId, d.DeviceId));
+        if on {
+            tracing::info!("RDNA 2 adapter: AHEAD_FIRST, CARD_FLAGGED, PASSES_AHEAD and RELAY default to 0 (issue #52)");
+        }
+        on
+    })
+}
+
 /// DXGI may return hardware for `EnumWarpAdapter` (notably under Proton).
 /// Reject it before creating a device in diagnostics' software-only mode.
 pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
@@ -853,6 +884,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn rdna2_is_navi_2x_only() {
+        for id in [0x73A0, 0x73BF, 0x73DF, 0x73EF, 0x73FF, 0x7422, 0x743F] {
+            assert!(is_rdna2(0x1002, id), "{id:#x}");
+        }
+        // RDNA 1 (RX 5700 XT), RDNA 3 (RX 7900 XTX, 7600), RDNA 4 (RX 9070 XT), APU, gap.
+        for id in [0x731F, 0x744C, 0x7480, 0x7550, 0x1681, 0x7400] {
+            assert!(!is_rdna2(0x1002, id), "{id:#x}");
+        }
+        assert!(!is_rdna2(0x10DE, 0x73BF));
+    }
 
     #[test]
     fn warp_adapter_accepts_only_software() {
