@@ -28,10 +28,16 @@ const ALLOWED_NAMES: &[&str] = &[
 ];
 
 /// Paths explicitly exempted, with a reason. Keep this empty if at all possible.
-const EXCEPTIONS: &[(&str, &str)] = &[(
-    "crates/victory-formats/src/bcpack-tables.bin",
-    "the BCPack format's constant tables: nothing decodes without them and they cannot be derived (owner's decision, 2026-11-23; docs/asset-policy.md)",
-)];
+const EXCEPTIONS: &[(&str, &str)] = &[
+    (
+        "crates/victory-formats/src/bcpack-tables.bin",
+        "the BCPack format's constant tables: nothing decodes without them and they cannot be derived (owner's decision, 2026-11-23; docs/asset-policy.md)",
+    ),
+    (
+        "crates/victory-gpu/src/klbf_card.png",
+        "the KLBF Lab Bench certificate template: our own drawing, made by tools/klbf-card-template.py, no game content (owner's decision pending before publishing)",
+    ),
+];
 
 /// Signatures of formats that must never be committed.
 const FORBIDDEN_MAGIC: &[(&[u8], &str)] = &[
