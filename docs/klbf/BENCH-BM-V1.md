@@ -1,5 +1,7 @@
 # KLBF Lab Bench · Bayside Morning v1 (BM-v1)
 
+The goal is cooperation: one repeatable test so each project can check its own builds, compare notes, and follow the changes that really work.
+
 One 5-minute run, always the same scene, to compare machines and versions. The build measures
 itself: you load one save, press Continue and touch nothing. Results: [Bayside Morning v1 — Results](BAYSIDE-MORNING-V1.md).
 

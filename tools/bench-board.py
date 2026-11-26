@@ -16,6 +16,8 @@ DOCS = HERE.parent / 'docs' / 'klbf'
 FORM = 'https://github.com/PastiiJay/klbf-lab/issues/new?template=bench-bm-v1.yml'
 HEAD = f"""# Bayside Morning v1 — Results
 
+The goal is cooperation: one repeatable test so each project can check its own builds, compare notes, and follow the changes that really work.
+
 > **Indicative only.** These are self-measured runs: we check each result file (duration, no input,
 > consistency, fingerprint), but we have not seen each player's screen, so we cannot confirm every
 > effect was drawn correctly. A higher fps can come from lower settings or skipped shaders.
