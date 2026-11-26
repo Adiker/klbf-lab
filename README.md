@@ -1,8 +1,8 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
 <h1 align="center">KLBF Lab</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-Lab%2035-1f46c8" alt="version: Lab 35">
-  <img src="https://img.shields.io/badge/prologue-~7%20fps-1f46c8" alt="prologue: about 7 fps">
+  <a href="https://github.com/PastiiJay/klbf-lab/tree/beta-2"><img src="https://img.shields.io/badge/real%20play-14.0%20fps%20avg%2C%2037%20min-2ea44f" alt="real play: 14.0 fps average over 37 minutes"></a>
+  <img src="https://img.shields.io/badge/stable%20code%20on%20main-Lab%2035-1f46c8" alt="stable code on main: Lab 35">
   <img src="https://img.shields.io/badge/license-GPL--3.0-555" alt="GPL-3.0">
   <a href="https://github.com/PastiiJay/klbf-lab/tree/beta-2"><img src="https://img.shields.io/badge/new%20test%20build-Lab%2061%20(beta--2)-2ea44f" alt="new test build: Lab 61 on beta-2"></a>
   <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>
@@ -60,9 +60,10 @@ Known issues:
 - Resolution is Series S, upscaled.
 
 
-The older Lab 35 status below is kept for reference.
+<details>
+<summary><b>Older status: Lab 35 (25 Nov 2026), the stable code on this branch</b></summary>
 
-## Status (2026-11-25, Lab 35)
+### Status (2026-11-25, Lab 35)
 
 Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), AMD Ryzen 7 9800X3D, 32 GB RAM, Windows 11. Self-reported, one machine so far.
 
@@ -81,9 +82,11 @@ Tested on one machine: AMD Radeon RX 9070 XT 16 GB (Adrenalin 32.0.32029.2010), 
 
 > **Stability policy:** we never publish a build that crashed in our tests. Every session length shown here is when **we** stopped, to get back to work on the project or because a test run reached its planned end, not a crash.
 
-### Why AMD FSR
+#### Why AMD FSR
 
 The recommended settings render the world at 1280×720 and upscale it to 1920×1080 with **AMD FSR** (FidelityFX Super Resolution). The game itself does the same on console: it ships with its own FSR upscaler and calls it every frame. KLBF Lab hands that call to AMD's official FidelityFX SDK on the PC, so the picture is upscaled the way the game expects, and the frame rate goes up by about a third. FSR works on AMD, NVIDIA and Intel cards. Native resolution without FSR is listed too (~5 fps).
+
+</details>
 
 ## Built by KLBF Lab
 
