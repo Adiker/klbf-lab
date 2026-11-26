@@ -227,6 +227,24 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let cli = Cli::parse();
+    // The commands that open a D3D12 device: without the Agility SDK beside the executable the
+    // loader fails on it (the exports above point there), so say so before the first D3D12 call.
+    #[cfg(windows)]
+    if matches!(
+        cli.command,
+        Command::Run { .. }
+            | Command::Translate { cache: true, .. }
+            | Command::Translate { pipelines: true, .. }
+            | Command::Warm { no_pipelines: false, .. }
+    ) {
+        let core = std::env::current_exe()?.with_file_name("D3D12").join("D3D12Core.dll");
+        anyhow::ensure!(
+            core.exists(),
+            "The D3D12 Agility SDK 1.620 is missing: run .\\play.ps1 once (it fetches it), \
+             or put D3D12Core.dll from Microsoft.Direct3D.D3D12 1.620.x into D3D12\\ \
+             next to victory.exe."
+        );
+    }
     match cli.command {
         Command::Inspect {
             file,

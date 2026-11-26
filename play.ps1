@@ -4,7 +4,8 @@
 # Options: -GameDir <folder with the title's files>, -Exe <the title's exe, default: the largest .exe there>,
 #          -FfxDir <FidelityFX SDK signedbin folder>, -SeriesX (Series X mode, no FSR needed),
 #          -LowMemory (textures capped at 512 px instead of 1024: fewer freezes when the card or PC memory is full, softer textures),
-#          -SkipMovies open|end|fast (skips the opening movies).
+#          -SkipMovies open|end|fast (skips the opening movies),
+#          -NoAgility (skip the D3D12 Agility SDK check), -Yes (fetch it without asking).
 # Bench: $env:KLBF_BENCH = 'bm-v1' before .\play.ps1 (5:00 measured from the first world frame, input locked).
 param(
   [string]$GameDir = 'C:\Games\Title',
@@ -13,12 +14,49 @@ param(
   [switch]$Prebuild,
   [switch]$SeriesX,
   [switch]$LowMemory,
-  [string]$SkipMovies = ''
+  [string]$SkipMovies = '',
+  [switch]$NoAgility,
+  [switch]$Yes
 )
 $ErrorActionPreference = 'Stop'
 $victory = Join-Path $PSScriptRoot 'target\release\victory.exe'
 if (-not (Test-Path $victory)) { throw "Build first: cargo build --release ($victory not found)" }
 if (-not (Test-Path $GameDir)) { throw "Game folder not found: $GameDir (use -GameDir)" }
+
+# victory.exe loads Microsoft's D3D12 Agility SDK from D3D12\ beside it (Windows 10's in-box D3D12
+# refuses our root signatures, #11 #85); without it the game does not start. Fetched once, with consent.
+$agility = Join-Path (Split-Path $victory) 'D3D12'
+if (-not $NoAgility -and -not (Test-Path (Join-Path $agility 'D3D12Core.dll'))) {
+  $ver = '1.620.2'
+  $url = "https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/$ver/microsoft.direct3d.d3d12.$ver.nupkg"
+  if (-not $Yes) {
+    $a = Read-Host "Microsoft's D3D12 Agility SDK $ver is missing next to victory.exe (needed to start). Download it from nuget.org? (Y/n)"
+    if ($a -and $a -notmatch '^[yY]') { throw "Agility SDK needed: put D3D12Core.dll from Microsoft.Direct3D.D3D12 1.620.x into $agility (or use -NoAgility)" }
+  }
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) "klbf-agility-$PID"
+  New-Item -ItemType Directory -Force $tmp | Out-Null
+  try {
+    $pkg = Join-Path $tmp 'agility.zip'
+    Invoke-WebRequest -UseBasicParsing $url -OutFile $pkg
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($pkg)
+    try {
+      foreach ($n in 'D3D12Core.dll', 'd3d12SDKLayers.dll') {
+        $e = $zip.GetEntry("build/native/bin/x64/$n")
+        if (-not $e) { throw "$n not in the package" }
+        $out = Join-Path $tmp $n
+        [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $out, $true)
+        $sig = Get-AuthenticodeSignature $out
+        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Microsoft') {
+          throw "$n is not validly signed by Microsoft ($($sig.Status)): refused"
+        }
+      }
+    } finally { $zip.Dispose() }
+    New-Item -ItemType Directory -Force $agility | Out-Null
+    foreach ($n in 'D3D12Core.dll', 'd3d12SDKLayers.dll') { Move-Item -Force (Join-Path $tmp $n) $agility }
+    "Agility SDK $ver installed in $agility"
+  } finally { Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue }
+}
 if (-not $Exe) { $Exe = (Get-ChildItem $GameDir -Filter *.exe | Sort-Object Length -Descending | Select-Object -First 1).FullName }
 
 # The same settings for pre-build and play: the shader cache key depends on them.

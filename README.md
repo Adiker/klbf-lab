@@ -88,6 +88,12 @@ powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title   # 
 
 `-SeriesX` plays in Series X mode (no FSR needed, slower). `-SkipMovies end` skips the opening movies (`open` and `fast` are other ways to do it). Textures are capped at 1024 px by default; `-LowMemory` caps them at 512 px: fewer freezes when memory is full, softer textures. `-FfxDir` points at another FSR folder. Plug the controller in before starting.
 
+### First start (Windows 10 and 11)
+
+`victory.exe` needs Microsoft's D3D12 Agility SDK 1.620 in a `D3D12\` folder next to it (Windows 10's built-in D3D12 refuses our root signatures). The first `play.ps1` run asks once, then downloads the official [Microsoft.Direct3D.D3D12 1.620.2](https://www.nuget.org/packages/Microsoft.Direct3D.D3D12/1.620.2) package from nuget.org, checks that the DLLs are signed by Microsoft and puts them there. `-Yes` skips the question, `-NoAgility` skips the step.
+
+By hand: download that package, open it as a zip and copy `build/native/bin/x64/D3D12Core.dll` and `d3d12SDKLayers.dll` into `target\release\D3D12\`.
+
 ### Seconds per frame under Wine
 
 If the world takes seconds a frame under Wine/Proton while the GPU is mostly idle and `wineserver` uses most of a core, the cause is in Wine, not in this branch: wineserver keeps each process's mapped views in a list and walks it on every map and unmap ([Wine bug 60868](https://bugs.winehq.org/show_bug.cgi?id=60868)). The title remaps its memory pages by the thousand each frame, so every call gets slower as views pile up. `perf` on `wineserver` shows almost all of its time in `req_unmap_view` and `is_valid_view_addr`, and the log's texture and copy times grow with the remaps.
@@ -107,7 +113,7 @@ From what testers have reported so far. To measure and compare on your machine, 
 | 12–16 GB VRAM | 1024, our default. | our runs |
 | AMD RX 6000 (RDNA 2) | Safe defaults are now applied automatically. | #52, #82 |
 | 16 GB RAM | Page file of 32 GB or more on an SSD, plus `-LowMemory`. Expect stutter. Commit can exceed 41 GB on 32 GB machines with the shipped pools. | #13 |
-| Windows 10 | Works on beta-2. If you copied D3D12 DLLs by hand, remove them. | reports |
+| Windows 10 | Supported with Microsoft's D3D12 Agility SDK 1.620 in `target\release\D3D12\` (`play.ps1` fetches it, see "First start"). | #11, #85 |
 | NVIDIA | Confirmed running on RTX 2080 and RTX 4060. | #65 |
 
 ## Settings
