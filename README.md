@@ -49,7 +49,7 @@ We propose a shared way to measure, so that every project can compare on equal f
 
 Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable. We are working on them now.
 
-Route: start at the male lead's house right after first arriving there (~3% progress), then a lap of his neighbourhood. One machine only: other cards and drivers may behave differently. Full log: [docs/klbf/results.md](docs/klbf/results.md).
+Route: start at the male lead's house right after first arriving there (~3% progress), from the save made after waking up in the morning (same time of day every run), then wander his neighbourhood, some driving and some walking. One machine only: other cards and drivers may behave differently. Full log: [docs/klbf/results.md](docs/klbf/results.md).
 
 Known issues:
 - Occasional freezes when the card or PC memory fills (try `-LowMemory`).
