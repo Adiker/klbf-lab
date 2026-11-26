@@ -4,6 +4,13 @@ Every KLBF Lab version, newest first. Measured on one machine: Windows 11, AMD R
 
 Product and controller names (Xbox, DualSense…) are only used to say what a build works with. They belong to their owners; KLBF Lab is not affiliated with or endorsed by them.
 
+## Lab 63 — Test build `beta-2` — 26 Nov 2026
+- **Bench BM-v1 built in** (`KLBF_BENCH=bm-v1`): 5:00 from the first world frame, input locked, certificate saved as PNG, JSON and text. Min and max are 1-second windows; the JSON (schema 1, SHA-256 serial) records the settings. Bench side of PR #78 (Vladimir-Human); its input replay is left out.
+- **Skip movies:** `-SkipMovies open|end|fast` (`VICTORY_SKIP_MOVIES`, zocram4cc and Yz, PR #77).
+- **Mesh index fix** (from Marvisak/VIctory, by tjthebigbearcat-hub): dark faces and green distant shrubs fixed. The shader translation changes: run `-Prebuild` again.
+- **Result:** not measured yet.
+- **Known issues:** water surfaces still flicker on AMD; car glass is still not drawn at default settings; plus Lab 62's.
+
 ## Lab 62 — Test build `beta-2` — 26 Nov 2026
 - **Sharper textures, far fewer freezes:** textures capped at 1024 px by default (`VICTORY_TEXTURE_MAX_DIM=1024`, Evan-Lowry's cap); `-LowMemory` now sets 512.
 - **Loading screens and menus kept sharp:** screen-sized and short-mip images are left at full size under the cap (`VICTORY_TEXTURE_MAX_DIM_KEEP_UI`, on by default).

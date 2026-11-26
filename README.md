@@ -1,7 +1,7 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab 62 — test build (26 Nov 2026)</h1>
+<h1 align="center">KLBF Lab 63 — test build (26 Nov 2026)</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-Lab%2062-1f46c8" alt="version: Lab 62">
+  <img src="https://img.shields.io/badge/version-Lab%2063-1f46c8" alt="version: Lab 63">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
   <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>
@@ -13,9 +13,15 @@ KLBF Lab is a test build of a compatibility layer that runs an Xbox Series title
 
 **No game files are included.** You need your own legally obtained copy. New to this? Follow the [beginner's guide](docs/GUIDE.md).
 
+**New in Lab 63:**
+- **Bench BM-v1 built in:** `$env:KLBF_BENCH = 'bm-v1'` before `play.ps1` measures 5:00 from the first world frame with input locked, then shows a certificate and saves it (PNG, JSON, text) in `bench-results` next to the exe. Min and max are the slowest and fastest 1-second windows; the JSON also records the settings (profile, upscaler, texture cap, pipelines skipped and denied, draws per frame, dropped draws). Procedure and results board: [BM-v1](https://github.com/PastiiJay/klbf-lab/blob/main/docs/klbf/BENCH-BM-V1.md). Bench side of PR #78 by Vladimir-Human (its input record and replay is left out: the replay drifted).
+- **Skip movies:** `-SkipMovies open|end|fast` (`VICTORY_SKIP_MOVIES`, by zocram4cc and Yz, PR #77) skips the opening movies.
+- **Mesh index fix:** mesh vertex indices masked to 9 bits (from Marvisak/VIctory, by tjthebigbearcat-hub): fixes dark faces and green distant shrubs.
+- **Run the pre-build again** (`.\play.ps1 -Prebuild`): the mesh fix changes the shader translation, so the old shader cache no longer matches.
+
 ## Speed
 
-**Lab 62 figures: measuring (real play session in progress).** The tables below are still Lab 61's.
+**Lab 63 figures: not measured yet.** The tables below are still Lab 61's.
 
 No cherry-picked numbers: these come from ordinary play, not from a quiet scene chosen to look good (scenes with only open water run higher). Measured during a real play session (controller), RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, the settings of [`play.ps1`](play.ps1):
 
@@ -58,9 +64,9 @@ Known issues:
 - Road paint markings and some small props (parking rocks) flicker.
 - Bushes look coarse.
 - Some shadows flicker near trees; very distant trees sometimes flash black.
-- Water surfaces are not drawn (the water is invisible or see-through), and lake water sometimes flickers; swimming still works.
+- Water surfaces still flicker on AMD; swimming still works.
 - Mirrors stay black (they need ray tracing).
-- Car windows (glass) are not drawn: you can break into a car but the glass is invisible.
+- Car windows (glass) are still not drawn at default settings: you can break into a car but the glass is invisible.
 - Resolution is Series S, upscaled.
 - AMD RDNA 2 cards (RX 6000 series) get safe defaults automatically (`VICTORY_AHEAD_FIRST`, `VICTORY_CARD_FLAGGED`, `VICTORY_PASSES_AHEAD` and `VICTORY_RELAY` off unless you set them), which avoids the device loss after 25-72 s. Thanks to @BlackBu7let for the bisect (#52). For a single-switch retest through `play.ps1`, set the corresponding environment variable before launching. Remove it before the default run (for example, `Remove-Item Env:VICTORY_AHEAD_FIRST -ErrorAction SilentlyContinue`).
 
@@ -76,7 +82,21 @@ powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title -Pre
 powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title   # play
 ```
 
-`-SeriesX` plays in Series X mode (no FSR needed, slower). Textures are capped at 1024 px by default; `-LowMemory` caps them at 512 px: fewer freezes when memory is full, softer textures. `-FfxDir` points at another FSR folder. Plug the controller in before starting.
+`-SeriesX` plays in Series X mode (no FSR needed, slower). `-SkipMovies end` skips the opening movies (`open` and `fast` are other ways to do it). Textures are capped at 1024 px by default; `-LowMemory` caps them at 512 px: fewer freezes when memory is full, softer textures. `-FfxDir` points at another FSR folder. Plug the controller in before starting.
+
+## Which settings for my PC?
+
+From what testers have reported so far. To measure and compare on your machine, run the BM-v1 bench (see "New in Lab 63").
+
+| Hardware | Settings | Source |
+|---|---|---|
+| Any | Series S + FSR (the default) is what we measure with and the smoothest. `-SeriesX` looks sharper but is slower. | our runs |
+| 8 GB VRAM (RTX 4060, RTX 2080 reports) | `-LowMemory` (`VICTORY_TEXTURE_MAX_DIM=512`): it removed black textures and the deep freeze. | #63, #65 |
+| 12–16 GB VRAM | 1024, our default. | our runs |
+| AMD RX 6000 (RDNA 2) | Safe defaults are now applied automatically. | #52, #82 |
+| 16 GB RAM | Page file of 32 GB or more on an SSD, plus `-LowMemory`. Expect stutter. Commit can exceed 41 GB on 32 GB machines with the shipped pools. | #13 |
+| Windows 10 | Works on beta-2. If you copied D3D12 DLLs by hand, remove them. | reports |
+| NVIDIA | Confirmed running on RTX 2080 and RTX 4060. | #65 |
 
 ## Settings
 

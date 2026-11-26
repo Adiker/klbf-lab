@@ -3,14 +3,17 @@
 #   .\play.ps1                  play
 # Options: -GameDir <folder with the title's files>, -Exe <the title's exe, default: the largest .exe there>,
 #          -FfxDir <FidelityFX SDK signedbin folder>, -SeriesX (Series X mode, no FSR needed),
-#          -LowMemory (textures capped at 512 px instead of 1024: fewer freezes when the card or PC memory is full, softer textures).
+#          -LowMemory (textures capped at 512 px instead of 1024: fewer freezes when the card or PC memory is full, softer textures),
+#          -SkipMovies open|end|fast (skips the opening movies).
+# Bench: $env:KLBF_BENCH = 'bm-v1' before .\play.ps1 (5:00 measured from the first world frame, input locked).
 param(
   [string]$GameDir = 'C:\Games\Title',
   [string]$Exe = '',
   [string]$FfxDir = 'C:\FidelityFX-SDK\Kits\FidelityFX\signedbin',
   [switch]$Prebuild,
   [switch]$SeriesX,
-  [switch]$LowMemory
+  [switch]$LowMemory,
+  [string]$SkipMovies = ''
 )
 $ErrorActionPreference = 'Stop'
 $victory = Join-Path $PSScriptRoot 'target\release\victory.exe'
@@ -47,6 +50,7 @@ $set = [ordered]@{
   VICTORY_TEXTURE_MAX_DIM = '1024'; VICTORY_LIBRARY_LOCK = '0'
 }
 if ($LowMemory) { $set['VICTORY_TEXTURE_MAX_DIM'] = '512' }
+if ($SkipMovies) { $set['VICTORY_SKIP_MOVIES'] = $SkipMovies }
 $console = @()
 $fsr = Join-Path $FfxDir 'amd_fidelityfx_upscaler_dx12.dll'
 if (-not $SeriesX) {
