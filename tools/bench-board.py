@@ -3,9 +3,11 @@
 # Every result must pass tools/bench-check.py; one that does not stops the run and nothing is written.
 # docs/klbf/bench/bm-v1/submissions.json gives, per serial, the submitter's GitHub login and the card
 # PNG attached to their issue: {"<serial>": {"login": "...", "card": "https://github.com/user-attachments/...",
-# "repo": "https://..."}} (repo: the form's project URL, used when the build has no git origin).
+# "repo": "https://...", "reference": true}} (repo: the form's project URL, used when the build has no
+# git origin; reference: our own run on the KLBF Lab test machine).
+# Also rewrites the "Latest run" line of README.md, between <!-- latest-run-start --> and -end -->.
 # The player on the card must be that login or "anonymous".
-import importlib.util, json, sys
+import importlib.util, json, re, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -13,7 +15,8 @@ spec = importlib.util.spec_from_file_location('bench_check', HERE / 'bench-check
 bc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bc)
 
-DOCS = HERE.parent / 'docs' / 'klbf'
+ROOT = HERE.parent
+DOCS = ROOT / 'docs' / 'klbf'
 FORM = 'https://github.com/PastiiJay/klbf-lab/issues/new?template=bench-bm-v1.yml'
 HEAD = f"""# Bayside Morning v1 — Results
 
@@ -42,6 +45,18 @@ VENDORS = (('AMD', ('amd', 'radeon')), ('NVIDIA', ('nvidia', 'geforce', 'rtx', '
            ('Intel', ('intel', ' arc ')))
 
 
+def latest_line(d, stem, card, repo, reference):
+    """The README's one line for the most recent run; stem relative to the repository root."""
+    a, st = d['fps'], d.get('settings') or {}
+    short = ', '.join(bc.cell(st[k]) for k in ('profile', 'upscaler') if st.get(k) not in (None, ''))
+    return ' · '.join(x for x in [
+        f"> **Latest run:** {bc.cell(d['date'])[:10]}", bc.player_link(d), bc.project_link(d, repo),
+        f"{bc.cell(d['gpu'])} / {bc.cell(d['cpu'])}",
+        f"{a['avg']:.1f} fps avg (median {a['median']:.1f}, 1 % low {a['low_1pct']:.1f})",
+        f'profile {short}' if st.get('profile') else short, f'[card]({card}) · [JSON]({stem}.json)',
+        bc.REFERENCE if reference else ''] if x)
+
+
 def vendor(gpu):
     g = f' {gpu.lower()} '
     return next((v for v, words in VENDORS if any(w in g for w in words)), 'Other')
@@ -68,16 +83,26 @@ def main():
         problems = bc.check(d, path.name, sub['login'])
         bad += [f'{path.name}: {x}' for x in problems]
         if not problems:
+            repo = sub['repo'] if str(sub.get('repo', '')).startswith('https://') else None
+            ref = sub.get('reference') is True
             rows.append((vendor(d['gpu']), d['gpu'], d['date'], d['serial'],
-                         bc.row(d, f'bench/bm-v1/{path.stem}', sub['card'],
-                                str(sub.get('repo', '')).startswith('https://') and sub['repo'] or None)))
+                         latest_line(d, f'docs/klbf/bench/bm-v1/{path.stem}', sub['card'], repo, ref),
+                         bc.row(d, f'bench/bm-v1/{path.stem}', sub['card'], repo, ref)))
     if bad:
         sys.exit('\n'.join(bad))
     groups = [v for v, _ in VENDORS] + ['Other']
     body = ''.join(f'\n## {v}\n\n' + TABLE + ''.join(r[-1] + '\n' for r in sorted(rows) if r[0] == v)
                    for v in groups if any(r[0] == v for r in rows)) or '\n_No results yet._\n'
     (DOCS / 'BAYSIDE-MORNING-V1.md').write_text(HEAD + body, encoding='utf-8', newline='\n')
-    print(f'{len(rows)} result(s) written to docs/klbf/BAYSIDE-MORNING-V1.md')
+    readme = ROOT / 'README.md'
+    text = readme.read_text(encoding='utf-8')
+    line = max(rows, key=lambda r: r[2])[4] if rows else '> _Latest run: none yet._'
+    new, n = re.subn(r'(<!-- latest-run-start -->\n).*?(\n> ?<!-- latest-run-end -->)',
+                     lambda m: m[1] + line + m[2], text, count=1, flags=re.S)
+    if n != 1:
+        sys.exit('README.md: the latest-run markers are missing')
+    readme.write_text(new, encoding='utf-8', newline='\n')
+    print(f'{len(rows)} result(s) written to docs/klbf/BAYSIDE-MORNING-V1.md and the README')
 
 
 if __name__ == '__main__':

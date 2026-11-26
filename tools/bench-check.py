@@ -110,22 +110,31 @@ def settings(d):
     return ' · '.join(f.format(cell(st[k])) for k, f in SETTINGS if st.get(k) not in (None, ''))
 
 
-def row(d, stem, card=None, repo=None):
-    """The board row; stem is the result's path without extension, relative to the board page.
-    The player is linked only once check() has matched it to the submitter's login."""
+REFERENCE = 'reference run — KLBF Lab test machine'
+
+
+def player_link(d, reference=False):
+    """Linked only once check() has matched the player to the submitter's login."""
     player = cell(d['player'])
     if player != 'anonymous' and LOGIN.match(player):
         player = f'[{player}](https://github.com/{player})'
-    proof = f'[JSON]({stem}.json)' + (f' · [card]({card})' if card else '')
+    return f'{player} ({REFERENCE})' if reference else player
+
+
+def project_link(d, repo=None):
+    """A build from git links its commit; otherwise the repo URL given with the submission."""
     proj, sha = cell(d['project']), cell(d['sha'])
-    # A build from git links its commit; otherwise the repo URL given with the submission.
     if d['project_source'] == 'git':
-        project = f'[{proj} @ {sha}](https://github.com/{proj}/tree/{sha})'
-    else:
-        project = f'[{proj} @ {sha}]({repo})' if repo else f'{proj} @ {sha}'
+        return f'[{proj}@{sha}](https://github.com/{proj}/tree/{sha})'
+    return f'[{proj}@{sha}]({repo})' if repo else f'{proj}@{sha}'
+
+
+def row(d, stem, card=None, repo=None, reference=False):
+    """The board row; stem is the result's path without extension, relative to the board page."""
+    proof = f'[JSON]({stem}.json)' + (f' · [card]({card})' if card else '')
     a = d['fps']
     return ' | '.join([
-        '', player, project, f"{cell(d['gpu'])} {d['gpu_vram_gb']:.0f} GB", cell(d['cpu']), f"{d['ram_gb']:.0f} GB",
+        '', player_link(d, reference), project_link(d, repo), f"{cell(d['gpu'])} {d['gpu_vram_gb']:.0f} GB", cell(d['cpu']), f"{d['ram_gb']:.0f} GB",
         f"{a['avg']:.1f}", f"{a['median']:.1f}", f"{a['low_1pct']:.1f}", f"{d['pct_time_ge_12fps']:.1f}",
         settings(d), cell(d['date'])[:10], proof, '']).strip()
 
