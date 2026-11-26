@@ -24,7 +24,16 @@ No cherry-picked numbers: these come from ordinary play, not from a quiet scene 
 | Driving a truck at moderate speed | up to 15 |
 | Driving fast through streets (the world streams in) | up to 12 |
 
-Lowest seen in every situation, outside freezes: 9 fps.
+How the frame rate is spread over a 16-minute real play session (182 one-second samples, on foot and driving), average **13 fps**:
+
+| fps | Share of the time |
+|---|---|
+| 18 and more | 14 % |
+| 15–18 | 17 % |
+| 12–15 | 32 % |
+| 9–12 | 23 % |
+| 5–9 | 8 % |
+| under 5 (freezes) | 6 % |
 
 Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable. We are working on them now.
 
