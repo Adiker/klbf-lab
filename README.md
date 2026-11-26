@@ -31,18 +31,20 @@ We propose a shared way to measure, so that every project can compare on equal f
 | Driving a truck at moderate speed | up to 15 |
 | Driving fast through streets (the world streams in) | up to 12 |
 
-**Stability index**: how the frame rate is spread over a 16-minute real play session (182 one-second samples, on foot and driving), average **13 fps**:
+<!-- live-start -->
+**Stability index**: how the frame rate is spread over a real play session still running, **24 minutes so far without a crash** (270 samples, on foot and driving; updated every 5 minutes of play):
 
 | fps | Share of the time |
 |---|---|
-| 18 and more | 14 % |
-| 15–18 | 17 % |
-| 12–15 | 32 % |
-| 9–12 | 23 % |
-| 5–9 | 8 % |
-| under 5 (freezes) | 6 % |
+| 18 and more | 15 % |
+| 15–18 | 28 % |
+| 12–15 | 29 % |
+| 9–12 | 17 % |
+| 5–9 | 6 % |
+| under 5 (freezes) | 5 % |
 
-**Average performance index**, same session: average 13.2 fps, median 13.2, 5 % low 1.7, 1 % low 0.2 (the lows are the freezes; samples are one-second averages).
+**Average performance index**, same session: average 14.0 fps, median 14.4, 5 % low 2.3, 1 % low 0.2 (the lows are the freezes).
+<!-- live-end -->
 
 Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable. We are working on them now.
 
