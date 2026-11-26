@@ -3,7 +3,7 @@
 #   .\play.ps1                  play
 # Options: -GameDir <folder with the title's files>, -Exe <the title's exe, default: the largest .exe there>,
 #          -FfxDir <FidelityFX SDK signedbin folder>, -SeriesX (Series X mode, no FSR needed),
-#          -LowMemory (textures capped at 512 px: fewer freezes when the card or PC memory is full, softer textures).
+#          -LowMemory (textures capped at 512 px instead of 1024: fewer freezes when the card or PC memory is full, softer textures).
 param(
   [string]$GameDir = 'C:\Games\Title',
   [string]$Exe = '',
@@ -40,6 +40,7 @@ $set = [ordered]@{
   VICTORY_CLAMP_AFTER_WRITER = '1'
   VICTORY_PORT_CONSTANTS = '1'; VICTORY_PORT_DESCRIPTORS = '1'
   VICTORY_DYNAMIC_SLOTS = '786432'
+  VICTORY_TEXTURE_MAX_DIM = '1024'; VICTORY_LIBRARY_LOCK = '0'
 }
 if ($LowMemory) { $set['VICTORY_TEXTURE_MAX_DIM'] = '512' }
 $console = @()

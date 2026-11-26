@@ -1,7 +1,7 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab 61 — test build (26 Nov 2026)</h1>
+<h1 align="center">KLBF Lab 62 — test build (26 Nov 2026)</h1>
 <p align="center">
-  <img src="https://img.shields.io/badge/version-Lab%2061-1f46c8" alt="version: Lab 61">
+  <img src="https://img.shields.io/badge/version-Lab%2062-1f46c8" alt="version: Lab 62">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
   <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>
@@ -14,6 +14,8 @@ KLBF Lab is a test build of a compatibility layer that runs an Xbox Series title
 **No game files are included.** You need your own legally obtained copy. New to this? Follow the [beginner's guide](docs/GUIDE.md).
 
 ## Speed
+
+**Lab 62 figures: measuring (real play session in progress).** The tables below are still Lab 61's.
 
 No cherry-picked numbers: these come from ordinary play, not from a quiet scene chosen to look good (scenes with only open water run higher). Measured during a real play session (controller), RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, the settings of [`play.ps1`](play.ps1):
 
@@ -52,7 +54,9 @@ Occasional short freezes in any situation (on foot or driving); they do not cras
 Route: start at the male lead's house right after first arriving there (~3% progress), from the save made after waking up in the morning (same time of day every run), then wander his neighbourhood, some driving and some walking. One machine only: other cards and drivers may behave differently. Full log: [docs/klbf/results.md](docs/klbf/results.md).
 
 Known issues:
-- Occasional freezes when the card or PC memory fills (try `-LowMemory`).
+- Occasional freezes when the card or PC memory fills (fewer since textures are capped at 1024 px; try `-LowMemory`).
+- Road paint markings and some small props (parking rocks) flicker.
+- Bushes look coarse.
 - Some shadows flicker near trees; very distant trees sometimes flash black.
 - Water surfaces are not drawn (the water is invisible or see-through), and lake water sometimes flickers; swimming still works.
 - Mirrors stay black (they need ray tracing).
@@ -71,7 +75,7 @@ powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title -Pre
 powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title   # play
 ```
 
-`-SeriesX` plays in Series X mode (no FSR needed, slower). `-LowMemory` caps textures at 512 px: fewer freezes when memory is full, softer textures. `-FfxDir` points at another FSR folder. Plug the controller in before starting.
+`-SeriesX` plays in Series X mode (no FSR needed, slower). Textures are capped at 1024 px by default; `-LowMemory` caps them at 512 px: fewer freezes when memory is full, softer textures. `-FfxDir` points at another FSR folder. Plug the controller in before starting.
 
 ## Settings
 
@@ -79,7 +83,7 @@ powershell -ExecutionPolicy Bypass -File .\play.ps1 -GameDir C:\Games\Title   # 
 
 - Our pre-build and skip list: `VICTORY_SKIP_PIPELINES` = [docs/klbf/skip-amd.txt](docs/klbf/skip-amd.txt); pipelines the driver crashed on are skipped from `prebuild-crashed.txt`.
 - New in this build: `VICTORY_CLAMP_AFTER_WRITER=1` (zm0kiemedia), `VICTORY_PORT_CONSTANTS=1` and `VICTORY_PORT_DESCRIPTORS=1` (avatarmanz's renderer port), `VICTORY_DYNAMIC_SLOTS=786432` (more descriptor slots: no more draws dropped, fixes flicker), `VICTORY_INDIRECT_RAW=0` and `VICTORY_STAGE_POOL_MB=2048` (WillyboPeep).
-- `-LowMemory`: `VICTORY_TEXTURE_MAX_DIM=512` (Evan-Lowry), off by default.
+- New in Lab 62: `VICTORY_TEXTURE_MAX_DIM=1024` by default (Evan-Lowry's cap; loading screens, menus and short-mip images are kept at full size, `VICTORY_TEXTURE_MAX_DIM_KEEP_UI=0` turns that off), `-LowMemory` sets 512. `VICTORY_LIBRARY_LOCK=0`: Ammar Zubair's AMD pipeline-library lock is on by default on AMD in the code, but the serialized compile was too slow in play, so the launcher turns it off (remove the line to try it). `VICTORY_TEXTURE_LRU=1` (samishating) is available, off by default.
 - Series S: `--console series-s` and `VICTORY_FSR_DLL=<FidelityFX SDK>\Kits\FidelityFX\signedbin\amd_fidelityfx_upscaler_dx12.dll`.
 - Neptune's set: `VICTORY_CARD_WINDOWS_MB=4096`, `BAKE_TEXTURES_MS=10000`, `EARLY_TEXTURES_MS=40`, `WAVE_OWN_LDS_GROUPS=64,128`, `WIDE_MERGE=1`, `RELAY_OWN_QUEUE=1`, `UNDER_WRITES_WORDS=1`, `UNDER_WRITES_RUNS=100000`, `UNDER_WRITES_MASKS=1`, `UNDER_WRITES_MASKS_LEAST=1`, `RELAY=2`, `WIDE_REFRESH=1`, `ASK_ONCE=1`, `TEXTURE_NO_WAIT=1`, `CARD_REHASH_RUNS=1`, `JOIN_COPIES=1`, `D3D12_BACKGROUND=0`, `LATE_WAIT_LISTS=1024`, `WINDOW_TAILS=1`, `TEXTURE_STAGE_MB=512`, `CARD_BUFFERS_MIN_KB=64`, `ASK_QUIET=8`, `COPY_CHANGED=1`, `QUIET_BACK=1`, `LIST_POOL_MOST=2048`, `LIST_POOL_MB=2048`, `WIDE_THREADS=12`, `TEXTURE_HASH_EVERY=32`, `LEVELS_ON_DEMAND=1`, `WINDOW_KB=1024`, `CARD_BUFFERS_MB=1536`, `CARD_WINDOW_UPLOAD=1`, `DROP_DXIL=1`, `DESC_DATA=1`, `VRAM_IDLE_MS=15000,2500,1000`, `PIPELINE_WAIT_MS=2500`, `OCEAN_READBACK=1`, `WATCH_4K=1`, `THIN=1`, `OVERLAY=0` (all with the `VICTORY_` prefix).
 
@@ -94,7 +98,9 @@ Every commit keeps its author. Thank you:
 - [@Marvisak](https://github.com/Marvisak) for [VIctory](https://github.com/Marvisak/VIctory), the base of everything here, and [@fxceless](https://github.com/fxceless) for [victory-fork](https://github.com/fxceless/victory-fork).
 - Traffic and [@zm0kiemedia](https://github.com/zm0kiemedia) for Neptune, the base of this build, and the indirect-argument clamps.
 - [@avatarmanz](https://github.com/avatarmanz) ([VIctory-7900XTX](https://github.com/avatarmanz/VIctory-7900XTX)): renderer port 1 and 2.
-- [@Evan-Lowry](https://github.com/Evan-Lowry): the texture size cap (`-LowMemory`).
+- [@Evan-Lowry](https://github.com/Evan-Lowry): the texture size cap.
+- Ammar Zubair: the AMD pipeline-library lock (amdxc64.dll crash).
+- samishating (from AKA0GHOST/victory-fork): least-recently-used texture copies (`VICTORY_TEXTURE_LRU`).
 - [@WillyboPeep](https://github.com/WillyboPeep) ([neptune-ve](https://github.com/WillyboPeep/neptune-ve)): loading-screen pipelines, section views, profiler and settings.
 - [@proneonn](https://github.com/proneonn) (Neon, [Vertex](https://github.com/proneonn/Vertex)) and [@tippythetaidum](https://github.com/tippythetaidum): face fixes.
 - [@GamingRipperDoc](https://github.com/GamingRipperDoc) (fxceless/victory-fork#1216, analysis by [@IxMxAMAR](https://github.com/IxMxAMAR)): device-loss fix.

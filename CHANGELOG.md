@@ -4,6 +4,14 @@ Every KLBF Lab version, newest first. Measured on one machine: Windows 11, AMD R
 
 Product and controller names (Xbox, DualSense…) are only used to say what a build works with. They belong to their owners; KLBF Lab is not affiliated with or endorsed by them.
 
+## Lab 62 — Test build `beta-2` — 26 Nov 2026
+- **Sharper textures, far fewer freezes:** textures capped at 1024 px by default (`VICTORY_TEXTURE_MAX_DIM=1024`, Evan-Lowry's cap); `-LowMemory` now sets 512.
+- **Loading screens and menus kept sharp:** screen-sized and short-mip images are left at full size under the cap (`VICTORY_TEXTURE_MAX_DIM_KEEP_UI`, on by default).
+- **AMD pipeline-library lock available** (Ammar Zubair, against amdxc64.dll crashes): on by default on AMD in the code, off in `play.ps1` (`VICTORY_LIBRARY_LOCK=0`, the serialized compile was too slow in play).
+- **Texture LRU** (samishating, from AKA0GHOST/victory-fork): `VICTORY_TEXTURE_LRU=1`, off by default.
+- **Result:** measuring (real play session in progress).
+- **Known issues:** road paint markings and some small props (parking rocks) flicker, bushes look coarse; plus Lab 61's (shadows near trees, black mirrors, invisible car glass, Series S resolution upscaled).
+
 ## Lab 61 — Test build `beta-2` — 26 Nov 2026
 - **Base:** Neptune 2026-11-25m (Traffic & zm0kiemedia) with WillyboPeep's changes, face fixes (proneonn, tippythetaidum), fxceless/victory-fork#1216 (GamingRipperDoc) and #1213 (IxMxAMAR, MalfoyDraco99), zm0kiemedia's clamps and avatarmanz's renderer port 1 and 2.
 - **Ours:** the crash-surviving pipeline pre-build and skip list, KLBF Lab names, `play.ps1` with our measured settings.
