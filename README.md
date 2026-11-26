@@ -35,6 +35,8 @@ How the frame rate is spread over a 16-minute real play session (182 one-second 
 | 5–9 | 8 % |
 | under 5 (freezes) | 6 % |
 
+Same session: average 13.2 fps, median 13.2, 5 % low 1.7, 1 % low 0.2 (the lows are the freezes; samples are one-second averages).
+
 Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable. We are working on them now.
 
 Route: start at the male lead's house right after first arriving there (~3% progress), then a lap of his neighbourhood. One machine only: other cards and drivers may behave differently. Full log: [docs/klbf/results.md](docs/klbf/results.md).
