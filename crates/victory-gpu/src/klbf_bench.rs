@@ -1474,11 +1474,12 @@ fn render_card_boxes(c: &Card, w: usize, h: usize, framed: bool) -> (Bitmap, Vec
     // From: project and player.
     // From: project (up to 2 lines) and player, between the postmark and the big average.
     let (from, size) = fit(&pen, ARIAL_BOLD, 18.0, &c.from, " ", 360.0, 2);
-    let top = if from.len() > 1 { 267.0 } else { 275.0 };
+    let top = if from.len() > 1 { 259.0 } else { 275.0 };
     for (i, line) in from.iter().enumerate() {
-        pen.text(ARIAL_BOLD, size, line, 600.0, top + 18.0 * i as f32, false, 360.0, ink);
+        pen.text(ARIAL_BOLD, size, line, 600.0, top + 17.0 * i as f32, false, 360.0, ink);
     }
-    pen.text(ARIAL, 15.0, &format!("player: {}", c.player), 600.0, top + 18.0 * from.len() as f32 + 7.0, false, 360.0, ink);
+    // The player stays above the rule under it (at 312).
+    pen.text(ARIAL, 15.0, &format!("player: {}", c.player), 600.0, 300.0, false, 360.0, ink);
     // The settings: a small block in the left panel, right of the stamp.
     for (i, line) in c.set.lines().iter().enumerate() {
         pen.text(ARIAL, 13.0, line, 180.0, 490.0 + 18.0 * i as f32, false, 290.0, ink);
