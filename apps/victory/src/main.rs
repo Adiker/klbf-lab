@@ -10,7 +10,6 @@ mod prebuild;
 mod run;
 mod shader;
 mod translate;
-mod discord;
 
 /// Counts the Rust heap's live bytes and their peak for the resident line. Not in diagnostics
 /// builds, where `victory-gpu`'s allocator does the counting.
@@ -220,10 +219,6 @@ pub static D3D12SDKPath: SdkPath = SdkPath(b".\\D3D12\\\0".as_ptr());
 fn main() -> Result<()> {
     // `VICTORY_HEAP_COUNT=1`: the Rust heap's live bytes for the resident line (off: it slowed loading).
     victory_core::heapcount::enable(std::env::var_os("VICTORY_HEAP_COUNT").is_some_and(|v| v == "1"));
-    // (Neptune) Discord Rich Presence while a title runs (`discord.rs`).
-    if std::env::args().nth(1).as_deref() == Some("run") {
-        discord::start();
-    }
     victory_core::logging::init("info");
     // The audio recorder `run` starts for `VICTORY_AUDIO_CAPTURE`.
     #[cfg(all(windows, feature = "diagnostics"))]
