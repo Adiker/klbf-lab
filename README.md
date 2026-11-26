@@ -189,8 +189,7 @@ These are a few runs on one machine: other cards and drivers may behave differen
 ### Step by step
 
 1. **Install the tools:** [Rust](https://rustup.rs) and Git. You also need your own copy of the game's Xbox Series files on disk, and 32 GB of RAM or a large Windows page file (a run commits about 20 GB).
-2. **Get the code and build it:** `git clone https://github.com/PastiiJay/klbf-lab` (or `git clone -b beta https://github.com/PastiiJay/klbf-lab` for the test build), `cd klbf-lab`, then `cargo build --release`. The program is `target
-eleaseictory.exe`.
+2. **Get the code and build it:** `git clone https://github.com/PastiiJay/klbf-lab` (or `git clone -b beta https://github.com/PastiiJay/klbf-lab` for the test build), `cd klbf-lab`, then `cargo build --release`. The program is `target\release\victory.exe`.
 3. **Get the FidelityFX SDK** (see the box above) for the recommended Series S settings.
 4. **Pre-build the pipelines, once.** This compiles all of the game's shaders for your graphics card ahead of time, so the game doesn't stutter or crash on them while you play. It takes about 10 to 20 minutes. If it crashes (the AMD driver sometimes does), just run the same command again: it resumes and remembers the shaders that crashed. Run it again after updating KLBF Lab. Set the same variables as for playing first (step 5), then:
 
