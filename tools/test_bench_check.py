@@ -1,5 +1,6 @@
-"""bench-check.py accepts a consistent BM-v1 result and rejects tampered ones."""
+"""bench-check.py accepts the game's own BM-v1 result and rejects tampered ones."""
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -8,98 +9,84 @@ import sys
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('bench_check', Path(__file__).with_name('bench-check.py'))
+HERE = Path(__file__).resolve().parent
+spec = importlib.util.spec_from_file_location('bench_check', HERE / 'bench-check.py')
 bc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bc)
 
-# 18,000 frames at 60 fps = 300 s; slowest frame 33.3 ms.
-VALID = {
-    "schema": 1, "bench": "KLBF Lab Bench", "test": "Bayside Morning v1", "test_id": "BM-v1",
-    "stamp": "CERTIFIED", "reason": "5:00 complete · no input", "stop": "5:00 reached",
-    "serial": "8e45f78d", "date": "2026-11-26T21:04:05",
-    "project": "PastiiJay/klbf-lab", "project_source": "git", "sha": "abc1234", "player": "PastiiJay",
-    "gpu": "AMD Radeon RX 9070 XT", "gpu_vram_gb": 15.9, "cpu": "AMD Ryzen 7 9800X3D 8-Core Processor",
-    "ram_gb": 31.6, "os": "Windows 11 (26200)",
-    "duration_s": 300.0, "target_s": 300, "frames": 18000,
-    "fps": {"avg": 60.00, "median": 60.50, "low_1pct": 40.00, "low_5pct": 50.00, "min": 30.03, "max": 70.00},
-    "pct_time_ge_12fps": 100.00, "freezes_over_200ms": 0, "longest_frame_ms": 33.3,
-    "black_frames": 0, "device_removed": False, "inputs_blocked": 0,
-    "shaders_translated": 0, "pipelines_compiled": 0,
-    "vram_end_mb": 9000, "vram_budget_mb": 15000, "ram_end_mb": 20000,
-    "share": "[KLBF Lab Bench BM-v1] PastiiJay/klbf-lab@abc1234 | RX 9070 XT | Ryzen 7 9800X3D | "
-             "avg 60.0 fps, 1% low 40.0 | CERTIFIED | 8e45f78d",
-}
-VALID["serial"] = SERIAL = bc.serial(VALID)
-VALID["share"] = VALID["share"].replace("8e45f78d", SERIAL)
-NAME = f'KLBF-Bench-BM-v1-{SERIAL}.json'
+# Written byte for byte by the game's test (crates/victory-gpu/src/klbf_bench.rs,
+# result_matches_the_checker_fixture).
+FIXTURE = HERE.parent / 'crates' / 'victory-gpu' / 'tests' / 'fixtures' / 'KLBF-Bench-BM-v1-3b8db536.json'
+VALID = json.loads(FIXTURE.read_text(encoding='utf-8'))
 
 
-def tampered(**changes):
+def tampered(fps=None, settings=None, **changes):
+    """VALID with changes, re-fingerprinted: only the rule under test can catch it."""
     d = copy.deepcopy(VALID)
-    for key, value in changes.items():
-        if key.startswith('fps_'):
-            d['fps'][key[4:]] = value
-        else:
-            d[key] = value
+    d.update(changes)
+    d['fps'].update(fps or {})
+    d['settings'].update(settings or {})
+    old, d['serial'] = d['serial'], bc.serial(d)
+    d['share'] = d['share'].replace(old, d['serial'])
     return d
 
 
 class BenchCheckTests(unittest.TestCase):
-    def test_valid_sample_passes(self):
-        self.assertEqual(bc.check(VALID, NAME), [])
+    def test_game_fixture_passes(self):
+        self.assertEqual(VALID['serial'], '3b8db536')
+        self.assertEqual(bc.check(VALID, FIXTURE.name), [])
+        self.assertEqual(bc.check(VALID, 'KLBF-Bench-BM-v1-20261126-2104-3b8db536.json'), [])
+
+    def test_serial_is_sha256_of_canonical_json(self):
+        rest = {k: v for k, v in VALID.items() if k not in ('serial', 'share')}
+        canon = json.dumps(rest, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+        self.assertEqual(VALID['serial'], hashlib.sha256(canon).hexdigest()[:8])
 
     def test_tampered_samples_fail(self):
+        edited = copy.deepcopy(VALID)
+        edited['fps']['avg'] = 90.0
         cases = {
-            'avg raised': tampered(fps_avg=90.0),
+            'edited, serial kept': edited,
+            'avg raised': tampered(fps={'avg': 90.0}),
             'short run': tampered(duration_s=200.0, stop='F10'),
             'partial': tampered(stamp='PARTIAL'),
             'black frames': tampered(black_frames=500),
-            'min not from longest frame': tampered(fps_min=50.0),
+            'min not the slowest second': tampered(fps={'min': 50.0}),
+            'max not the fastest second': tampered(fps={'max': 70.0}),
+            'per-second figures edited': tampered(fps_per_second=[60.0, 59.0, 61.2]),
             'other version': tampered(test_id='BM-v2'),
-            'serial edited': tampered(serial='deadbeef'),
-            'figure edited, serial kept': tampered(frames=18001),
-            'no schema': {k: v for k, v in VALID.items() if k != 'schema'},
-            'missing field': {k: v for k, v in VALID.items() if k != 'frames'},
+            'no schema': tampered(schema=None),
         }
         for label, d in cases.items():
             with self.subTest(label):
-                self.assertNotEqual(bc.check(d, NAME), [])
+                self.assertNotEqual(bc.check(d), [])
         self.assertNotEqual(bc.check(VALID, 'KLBF-Bench-BM-v1-00000000.json'), [])
-        self.assertNotEqual(bc.check(VALID, NAME, login='someone-else'), [])
-        self.assertEqual(bc.check(VALID, NAME, login='pastiijay'), [])
-        anonymous = tampered(player='anonymous')
-        anonymous['serial'] = bc.serial(anonymous)
-        anonymous['share'] = anonymous['share'].replace(SERIAL, anonymous['serial'])
-        self.assertEqual(bc.check(anonymous, f"KLBF-Bench-BM-v1-{anonymous['serial']}.json", login='someone-else'), [])
 
-    def test_serial_is_sha256_of_canonical_json(self):
-        import hashlib
-        rest = {k: v for k, v in VALID.items() if k not in ('serial', 'share')}
-        canon = json.dumps(rest, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
-        self.assertEqual(SERIAL, hashlib.sha256(canon).hexdigest()[:8])
+    def test_player_must_be_the_submitter(self):
+        self.assertEqual(bc.check(VALID, login='someone-else'), [])  # anonymous
+        named = tampered(player='PastiiJay')
+        self.assertEqual(bc.check(named, login='pastiijay'), [])
+        self.assertNotEqual(bc.check(named, login='someone-else'), [])
 
     def test_cli_prints_one_row(self):
+        script = str(HERE / 'bench-check.py')
+        card = 'https://github.com/user-attachments/assets/x'
+        out = subprocess.run([sys.executable, '-I', script, str(FIXTURE), '--card', card],
+                             capture_output=True, text=True, encoding='utf8')
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(len(out.stdout.strip().splitlines()), 1)
+        self.assertIn(f'[card]({card})', out.stdout)
+        self.assertIn('profile S · FSR · textures ≤ 1024 px · 12 pipelines skipped', out.stdout)
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / NAME
-            path.write_text(json.dumps(VALID), encoding='utf8')
-            out = subprocess.run([sys.executable, '-I', str(Path(__file__).with_name('bench-check.py')), str(path),
-                                  '--login', 'PastiiJay', '--card', 'https://github.com/user-attachments/assets/x'],
-                                 capture_output=True, text=True, encoding='utf8')
-            self.assertIn('[card](https://github.com/user-attachments/assets/x)', out.stdout)
-            self.assertEqual(out.returncode, 0, out.stderr)
-            self.assertEqual(len(out.stdout.strip().splitlines()), 1)
-            self.assertIn('[PastiiJay](https://github.com/PastiiJay)', out.stdout)
-            self.assertIn(f'bench/bm-v1/{Path(NAME).stem}.json', out.stdout)
-            path.write_text(json.dumps(tampered(fps_avg=90.0)), encoding='utf8')
-            bad = subprocess.run([sys.executable, '-I', str(Path(__file__).with_name('bench-check.py')), str(path)],
-                                 capture_output=True, text=True, encoding='utf8')
+            path = Path(directory) / FIXTURE.name
+            path.write_text(json.dumps(tampered(fps={'avg': 90.0})), encoding='utf8')
+            bad = subprocess.run([sys.executable, '-I', script, str(path)], capture_output=True, text=True, encoding='utf8')
             self.assertEqual(bad.returncode, 1)
 
     def test_settings_column(self):
-        self.assertEqual(bc.settings(VALID), '')
-        self.assertEqual(bc.settings(tampered(profile='S', upscaler='FSR', draws_per_frame=6500)),
-                         'profile S · FSR · 6500 draws/frame')
-        self.assertEqual(bc.settings(tampered(dropped_draws_pct=1.5)), '1.5 % draws dropped')
+        self.assertEqual(bc.settings(VALID), 'profile S · FSR · textures ≤ 1024 px · 12 pipelines skipped · '
+                                             '0 pipelines denied · 4321.5 draws/frame · 0.25 % draws dropped')
+        self.assertEqual(bc.settings({}), '')
 
 
 if __name__ == '__main__':

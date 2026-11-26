@@ -59,15 +59,32 @@ exits.
 - **from:** the project and version (`owner/repo @ commit`), read from git at build time; "(declared)"
   when given by `KLBF_PROJECT_NAME`, "unknown (local build)" otherwise. Below it, the player.
 - **Big number**: average fps.
-- **Four boxes**: median fps; 1 % low (average of the slowest 1 % of frames); max fps; time ≥ 12 fps
+- **Four boxes**: median fps; 1 % low (average of the slowest 1 % of frames); max fps (the fastest 1-second window); time ≥ 12 fps
   (share of the time spent at 12 fps or more).
 - **Thin line**: freezes (frames over 200 ms), measured duration, inputs blocked.
 - **Bold line**: the machine (GPU and its memory, CPU, RAM, Windows).
 - **Share line**: the one-line summary.
 
-The files are in `bench-results\` next to the exe: `KLBF-Bench-BM-v1-<serial>.png` (the card),
-`.json` (every figure, including 5 % low, min, black frames, shaders and pipelines compiled during
-the run, memory at the end) and `.txt` (readable summary and share line).
+## Your data stays on your PC
+
+- The bench sends nothing anywhere: no network, no account, no upload.
+- The card and the result files are written only to your own disk.
+- The code is open: see `crates/victory-gpu/src/klbf_bench.rs`.
+- Posting the card, or submitting a result to the board, is entirely your choice.
+- The result files hold your frame figures (the average of each second and the summary figures, not
+  each frame), the date and time of the run and its verdict, your hardware names (GPU and its memory,
+  CPU, RAM, Windows version), the build's project and commit, the settings, and the nickname you
+  chose. They also hold a few run checks: black frames, inputs blocked, shaders and pipelines
+  compiled during the run, and the video and system memory in use at the end. No user name, no
+  paths, no IDs.
+
+## Where is my card?
+
+- In the folder `bench-results` next to `victory.exe` (or in `KLBF_BENCH_DIR` if you set it).
+- One file per run, named `KLBF-Bench-BM-v1-YYYYMMDD-HHMM-<serial>.png`, with matching `.json` and
+  `.txt`. A new run never overwrites an older one.
+- The full path is also printed in the console at the end of the run.
+- To share: drag the PNG into Fluxer or a GitHub comment and paste the share line from the `.txt`.
 
 ## Share
 
