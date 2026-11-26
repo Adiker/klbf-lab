@@ -3,7 +3,10 @@
 <p align="center">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
+  <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>
 </p>
+
+> **📏 A shared frame-rate standard.** Numbers between projects cannot be compared today (empty seas, menus, one lucky second). We propose one method for everyone: same starting save, same route, three tables (frame rate seen in the world, stability index, average performance index). **[Read the method](docs/klbf/MEASUREMENT.md)**, use it, and post your numbers.
 
 KLBF Lab is a test build of a compatibility layer that runs an Xbox Series title natively on Windows from files you supply. It gathers the best fixes we could measure, aimed at **AMD Radeon (RDNA, 64-lane) cards**. This build is based on Neptune (Traffic & zm0kiemedia) plus contributors' fixes credited below, and our pipeline pre-build that survives AMD driver crashes.
 
