@@ -11,14 +11,16 @@ KLBF Lab is a test build of a compatibility layer that runs an Xbox Series title
 
 ## Speed
 
-Measured during a real play session (controller), RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, the settings of [`play.ps1`](play.ps1):
+No cherry-picked numbers: these come from ordinary play, not from a quiet scene chosen to look good (scenes with only open water run higher). Measured during a real play session (controller), RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, the settings of [`play.ps1`](play.ps1):
 
 | Situation | fps |
 |---|---|
 | Standing still, looking at the sky | 20–23 |
 | Standing still in traffic | 15–17 |
 | On foot in the open world | up to 14 (varies with the area) |
-| Driving fast (the world streams in) | 9–12, short dips while new areas load |
+| Driving fast through streets (the world streams in) | 9–12, short dips while new areas load |
+| Driving a truck at moderate speed | up to 15 |
+| Driving over a bridge above water (little to load) | up to 17 |
 
 Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable.
 
@@ -26,7 +28,7 @@ Route: start at the male lead's house right after first arriving there (~3% prog
 
 Known issues:
 - Occasional freezes when the card or PC memory fills (try `-LowMemory`).
-- Some shadows flicker near trees.
+- Some shadows flicker near trees; very distant trees sometimes flash black.
 - Mirrors stay black (they need ray tracing).
 - Car windows (glass) are not drawn: you can break into a car but the glass is invisible.
 - Resolution is Series S, upscaled.
