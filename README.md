@@ -217,7 +217,7 @@ target\release\victory.exe run --console series-s <game dir>\<the title's exe> -
 `--console series-s` makes the title render at 1280×720, and AMD FSR (from the official [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK)) upscales it to 1920×1080: that is the ~7 fps setting. Without `--console series-s` the title renders at its native resolution (~5 fps here).
 
 > [!TIP]
-> With the recommended settings the start screen and the main menu stay **black**: the title is running behind it. Press **A** on the controller (or **Enter** on the keyboard, with the game window focused) to get past them; the picture appears once the world loads. Plug the controller in **before** starting: plugging it in during play pauses the title.
+> With the recommended settings the start screen and the main menu stay **black**: the title is running behind it. Press **A** on the controller to get past them (the keyboard works on the start screen, but the account picker only answers the controller, [#69](https://github.com/PastiiJay/klbf-lab/issues/69)); the picture appears once the world loads. Plug the controller in **before** starting: plugging it in during play pauses the title.
 
 If the device is lost about a minute after the world starts loading (reported on an RX 9070 non-XT, [#6](https://github.com/PastiiJay/klbf-lab-beta/issues/6)), try `VICTORY_LATE_WAIT=0`.
 
