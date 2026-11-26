@@ -777,6 +777,22 @@ pub(crate) fn on_warp() -> bool {
     cfg!(feature = "diagnostics") && std::env::var_os("VICTORY_D3D12_WARP").is_some()
 }
 
+impl Host {
+    /// Whether the host GPU adapter is AMD (vendor ID 0x1002).
+    pub(crate) fn is_amd(&self) -> bool {
+        self.adapter
+            .as_ref()
+            // SAFETY: a plain DXGI adapter query.
+            .and_then(|a| unsafe { a.GetDesc1() }.ok())
+            .is_some_and(|d| d.VendorId == 0x1002)
+    }
+}
+
+/// Whether the active host adapter is an AMD GPU.
+pub(crate) fn is_amd() -> bool {
+    host().is_some_and(|h| h.is_amd())
+}
+
 /// DXGI may return hardware for `EnumWarpAdapter` (notably under Proton).
 /// Reject it before creating a device in diagnostics' software-only mode.
 pub(crate) fn warp_adapter() -> windows::core::Result<IDXGIAdapter> {
