@@ -196,22 +196,22 @@ enum Console {
     SeriesS,
 }
 
-/// (Neptune) Diagnostics builds: the redistributable D3D12 runtime and debug layer in `D3D12\`
-/// beside the executable are used if they are there (`build.rs` exports these two; the
-/// version is the middle number of the package's, 1.620.2).
-#[cfg(all(windows, feature = "diagnostics"))]
+/// The redistributable D3D12 runtime (Agility SDK) in `D3D12\` beside the executable
+/// (`build.rs` exports these two; the version is the middle number of the package's, 1.620.2;
+/// `tests/exports.rs` checks they are in the built executable).
+#[cfg(windows)]
 #[unsafe(no_mangle)]
 #[used]
 pub static D3D12SDKVersion: u32 = 620;
 
-#[cfg(all(windows, feature = "diagnostics"))]
+#[cfg(windows)]
 #[repr(transparent)]
 pub struct SdkPath(*const u8);
 // SAFETY: a pointer to a constant string.
-#[cfg(all(windows, feature = "diagnostics"))]
+#[cfg(windows)]
 unsafe impl Sync for SdkPath {}
 
-#[cfg(all(windows, feature = "diagnostics"))]
+#[cfg(windows)]
 #[unsafe(no_mangle)]
 #[used]
 #[allow(clippy::manual_c_str_literals)] // exported as bytes, not as a `c_char` string
