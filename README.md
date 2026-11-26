@@ -1,6 +1,7 @@
 <p align="center"><img src="docs/klbf/logo.svg" width="120" alt="KLBF Lab"></p>
-<h1 align="center">KLBF Lab — test build (26 Nov 2026)</h1>
+<h1 align="center">KLBF Lab 61 — test build (26 Nov 2026)</h1>
 <p align="center">
+  <img src="https://img.shields.io/badge/version-Lab%2061-1f46c8" alt="version: Lab 61">
   <img src="https://img.shields.io/badge/tested%20on-RX%209070%20XT-555" alt="tested on RX 9070 XT">
   <img src="https://img.shields.io/badge/stage-experimental-ffb000" alt="experimental">
   <a href="docs/klbf/MEASUREMENT.md"><img src="https://img.shields.io/badge/fps-shared%20measurement%20method-2ea44f" alt="shared measurement method"></a>

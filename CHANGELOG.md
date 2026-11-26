@@ -4,7 +4,7 @@ Every KLBF Lab version, newest first. Measured on one machine: Windows 11, AMD R
 
 Product and controller names (Xbox, DualSense…) are only used to say what a build works with. They belong to their owners; KLBF Lab is not affiliated with or endorsed by them.
 
-## Test build `beta-2` — 26 Nov 2026
+## Lab 61 — Test build `beta-2` — 26 Nov 2026
 - **Base:** Neptune 2026-11-25m (Traffic & zm0kiemedia) with WillyboPeep's changes, face fixes (proneonn, tippythetaidum), fxceless/victory-fork#1216 (GamingRipperDoc) and #1213 (IxMxAMAR, MalfoyDraco99), zm0kiemedia's clamps and avatarmanz's renderer port 1 and 2.
 - **Ours:** the crash-surviving pipeline pre-build and skip list, KLBF Lab names, `play.ps1` with our measured settings.
 - **New:** `VICTORY_DYNAMIC_SLOTS=786432` set by default (about 37 draws a frame were dropped for lack of descriptor slots: flicker fixed); `-LowMemory` switch sets `VICTORY_TEXTURE_MAX_DIM=512` (Evan-Lowry's texture cap: fewer freezes when memory is full, softer textures).
