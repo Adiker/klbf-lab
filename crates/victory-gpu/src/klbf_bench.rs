@@ -307,6 +307,17 @@ impl Settings {
         }
     }
 
+    /// The card's short block.
+    fn lines(&self) -> [String; 4] {
+        let textures = if self.texture_max_dim > 0 { format!("textures \u{2264} {} px", self.texture_max_dim) } else { "textures uncapped".into() };
+        [
+            format!("profile {} \u{b7} {}", self.profile, self.upscaler),
+            textures,
+            format!("{:.0} draws/frame \u{b7} {:.1} % dropped", self.draws_per_frame, self.dropped_pct),
+            format!("pipelines: {} skipped \u{b7} {} denied", self.skipped, self.denied),
+        ]
+    }
+
     fn line(&self) -> String {
         let textures = if self.texture_max_dim > 0 { format!("textures \u{2264} {} px", self.texture_max_dim) } else { "textures uncapped".into() };
         format!(
@@ -1263,6 +1274,8 @@ struct Pen<'a> {
     ox: f32,
     oy: f32,
     k: f32,
+    /// The pixel box (x0, y0, x1, y1, exclusive) of every text drawn, for the layout test.
+    boxes: Vec<[i32; 4]>,
 }
 
 impl Pen<'_> {
@@ -1277,14 +1290,23 @@ impl Pen<'_> {
     /// Returns the width drawn, in units.
     #[allow(clippy::too_many_arguments)]
     fn text(&mut self, font: Font, size: f32, s: &str, x: f32, base: f32, centre: bool, max_w: f32, rgb: [u8; 3]) -> f32 {
-        let mut m = text(font, size * self.k, 0.0, s);
-        let w = m.adv / self.k;
-        if w > max_w && w > 0.0 {
-            m = text(font, size * self.k * max_w / w, 0.0, s);
+        // Shrunk until its inked width fits (font sizes round, so one scaling may not do).
+        let (mut px, mut m) = (size * self.k, text(font, size * self.k, 0.0, s));
+        for _ in 0..8 {
+            let w = ink_width(&m) / self.k;
+            if w <= max_w || w <= 0.0 {
+                break;
+            }
+            px *= max_w / w * 0.98;
+            m = text(font, px, 0.0, s);
         }
         let w = m.adv / self.k;
         let left = if centre { x - w / 2.0 } else { x };
-        paint(self.bm, &m, self.x(left).round() as i32 - 1, (self.y(base) - m.ascent).round() as i32, 255, rgb);
+        let (x0, y0) = (self.x(left).round() as i32 - 1, (self.y(base) - m.ascent).round() as i32);
+        paint(self.bm, &m, x0, y0, 255, rgb);
+        if let Some([a, b, c, d]) = ink_box(&m) {
+            self.boxes.push([x0 + a, y0 + b, x0 + c, y0 + d]);
+        }
         w
     }
 
@@ -1293,7 +1315,28 @@ impl Pen<'_> {
     }
 }
 
-/// `s` split at `sep` into lines no wider than `max_w` units at `size`.
+/// The box (x0, y0, x1, y1, exclusive) of a mask's inked pixels.
+fn ink_box(m: &Mask) -> Option<[i32; 4]> {
+    let mut b: Option<[i32; 4]> = None;
+    for y in 0..m.h {
+        for x in 0..m.w {
+            if m.v[y * m.w + x] > 0 {
+                let (x, y) = (x as i32, y as i32);
+                let r = b.get_or_insert([x, y, x + 1, y + 1]);
+                *r = [r[0].min(x), r[1].min(y), r[2].max(x + 1), r[3].max(y + 1)];
+            }
+        }
+    }
+    b
+}
+
+/// From the pen position to the last inked pixel, in px (at least the advance).
+fn ink_width(m: &Mask) -> f32 {
+    ink_box(m).map_or(m.adv, |b| m.adv.max(b[2] as f32 - 1.0))
+}
+
+/// `s` split at `sep` into lines no wider than `max_w` units at `size`; a part too wide alone is
+/// split word by word.
 fn wrap(pen: &Pen, font: Font, size: f32, s: &str, sep: &str, max_w: f32) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for part in s.split(sep) {
@@ -1304,9 +1347,40 @@ fn wrap(pen: &Pen, font: Font, size: f32, s: &str, sep: &str, max_w: f32) -> Vec
                 continue;
             }
         }
-        lines.push(part.to_string());
+        if pen.width(font, size, part) <= max_w {
+            lines.push(part.to_string());
+            continue;
+        }
+        let mut fresh = true;
+        for word in part.split(' ') {
+            match lines.last_mut() {
+                Some(last) if !fresh && pen.width(font, size, &format!("{last} {word}")) <= max_w => {
+                    last.push(' ');
+                    last.push_str(word);
+                }
+                _ => lines.push(word.to_string()),
+            }
+            fresh = false;
+        }
     }
     lines
+}
+
+/// `s` wrapped into at most `most` lines: at `size`, else at up to 20 % smaller, else the last
+/// line keeps the rest (and is shrunk when drawn). Returns the lines and the size.
+#[allow(clippy::too_many_arguments)]
+fn fit(pen: &Pen, font: Font, size: f32, s: &str, sep: &str, max_w: f32, most: usize) -> (Vec<String>, f32) {
+    let mut lines = Vec::new();
+    for step in 0..5 {
+        let at = size * (1.0 - 0.05 * step as f32);
+        lines = wrap(pen, font, at, s, sep, max_w);
+        if lines.len() <= most {
+            return (lines, at);
+        }
+    }
+    let rest = lines.split_off(most - 1).join(" ");
+    lines.push(rest);
+    (lines, size * 0.8)
 }
 
 fn card_scale(w: usize, h: usize) -> f32 {
@@ -1325,6 +1399,11 @@ static TEMPLATE_PX: LazyLock<Option<(usize, usize, Vec<u8>)>> = LazyLock::new(||
 /// The certificate, opaque, `w` x `h` px: the template (scaled to fit, centred on a dark backdrop
 /// when `framed`, else filling the bitmap) with the variable texts written over it.
 fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
+    render_card_boxes(c, w, h, framed).0
+}
+
+/// [`render_card`], with the pixel box of every text drawn.
+fn render_card_boxes(c: &Card, w: usize, h: usize, framed: bool) -> (Bitmap, Vec<[i32; 4]>) {
     let mut bm = Bitmap::new(w, h);
     for p in bm.px.chunks_exact_mut(4) {
         p.copy_from_slice(&[BACKDROP[0], BACKDROP[1], BACKDROP[2], 255]);
@@ -1362,7 +1441,7 @@ fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
             }
         }
     }
-    let mut pen = Pen { bm: &mut bm, ox, oy, k };
+    let mut pen = Pen { bm: &mut bm, ox, oy, k, boxes: Vec::new() };
     let ink = hex(INK);
     // Left: the date and how it ended.
     pen.text(GEORGIA, 18.0, &format!("{} \u{b7} {}", c.date, c.reason), 255.0, 394.0, true, 370.0, ink);
@@ -1393,8 +1472,17 @@ fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
         paint(pen.bm, &turned, bx as i32, by as i32, alpha, rgb);
     }
     // From: project and player.
-    pen.text(ARIAL_BOLD, 18.0, &c.from, 600.0, 275.0, false, 360.0, ink);
-    pen.text(ARIAL, 15.0, &format!("player: {}", c.player), 600.0, 300.0, false, 360.0, ink);
+    // From: project (up to 2 lines) and player, between the postmark and the big average.
+    let (from, size) = fit(&pen, ARIAL_BOLD, 18.0, &c.from, " ", 360.0, 2);
+    let top = if from.len() > 1 { 267.0 } else { 275.0 };
+    for (i, line) in from.iter().enumerate() {
+        pen.text(ARIAL_BOLD, size, line, 600.0, top + 18.0 * i as f32, false, 360.0, ink);
+    }
+    pen.text(ARIAL, 15.0, &format!("player: {}", c.player), 600.0, top + 18.0 * from.len() as f32 + 7.0, false, 360.0, ink);
+    // The settings: a small block in the left panel, right of the stamp.
+    for (i, line) in c.set.lines().iter().enumerate() {
+        pen.text(ARIAL, 13.0, line, 180.0, 490.0 + 18.0 * i as f32, false, 290.0, ink);
+    }
     // The average, big, and the four tiles.
     pen.text(IMPACT, 64.0, &format!("{:.1}", c.s.avg), 535.0, 380.0, false, 135.0, ink);
     let tiles = [format!("{:.1}", c.s.median), format!("{:.1}", c.s.low1), format!("{:.1}", c.s.max), format!("{:.0} %", c.s.pct12)];
@@ -1405,14 +1493,12 @@ fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
     let blocked = if c.blocked > 0 { format!(" \u{b7} {} inputs blocked", c.blocked) } else { String::new() };
     pen.text(ARIAL, 14.0, &format!("freezes {} \u{b7} {} in the world{blocked}", c.s.freezes, mmss(c.elapsed)), 535.0, 484.0, false, 425.0, ink);
     let mut y = 484.0;
-    for line in wrap(&pen, ARIAL_BOLD, 14.0, &c.sys.line(), " \u{b7} ", 425.0).iter().take(2) {
-        y += 20.0;
-        pen.text(ARIAL_BOLD, 14.0, line, 535.0, y, false, 425.0, ink);
+    let (machine, size) = fit(&pen, ARIAL_BOLD, 14.0, &c.sys.line(), " \u{b7} ", 425.0, 3);
+    for line in &machine {
+        y += 19.0;
+        pen.text(ARIAL_BOLD, size, line, 535.0, y, false, 425.0, ink);
     }
-    // The settings on one line (shrunk to fit); the share line gives up its third line for it.
-    y += 18.0;
-    pen.text(ARIAL, 12.0, &c.set.line(), 535.0, y, false, 425.0, ink);
-    y += 16.0;
+    y += 14.0;
     let mut x = 535.0;
     while x < 960.0 {
         let (x0, y0, x1, y1) = (pen.x(x), pen.y(y - 0.5), pen.x((x + 3.0).min(960.0)), pen.y(y + 0.5).max(pen.y(y - 0.5) + 1.0));
@@ -1423,14 +1509,18 @@ fn render_card(c: &Card, w: usize, h: usize, framed: bool) -> Bitmap {
         }
         x += 7.0;
     }
-    y += 10.0;
-    for line in wrap(&pen, ARIAL, 12.0, &c.share, " | ", 425.0).iter().take(2) {
-        y += 18.0;
-        pen.text(ARIAL, 12.0, line, 535.0, y, false, 425.0, hex(SOFT));
+    y += 6.0;
+    // The share line in what is left above the "Saved" line (3 lines when the machine took 2).
+    let room = (((604.0 - y) / 15.0) as usize).clamp(1, 3);
+    let (share, size) = fit(&pen, ARIAL, 12.0, &c.share, " | ", 425.0, room);
+    for line in &share {
+        y += 15.0;
+        pen.text(ARIAL, size, line, 535.0, y, false, 425.0, hex(SOFT));
     }
     // Where the PNG went.
     pen.text(ARIAL, 11.0, &format!("Saved: {}", c.png_name), 500.0, 621.0, true, 940.0, hex(SOFT));
-    bm
+    let boxes = std::mem::take(&mut pen.boxes);
+    (bm, boxes)
 }
 
 #[cfg(test)]
@@ -1481,10 +1571,8 @@ mod tests {
         assert_eq!(serial(&doc), "6797e740");
     }
 
-    /// A result the game writes, byte for byte the fixture `tools/bench-check.py` accepts
-    /// (`python -I tools/bench-check.py crates/victory-gpu/tests/fixtures/KLBF-Bench-BM-v1-3b8db536.json`).
-    #[test]
-    fn result_matches_the_checker_fixture() {
+    /// The certified sample run of the fixture below.
+    fn sample_card() -> Card {
         let s = Summary {
             frames: 18_000,
             avg: 60.0,
@@ -1497,7 +1585,7 @@ mod tests {
             freezes: 0,
             longest_ms: 17.45,
         };
-        let card = Card {
+        Card {
             stamp: Stamp::Certified,
             reason: "5:00 complete \u{b7} no input".into(),
             serial: String::new(),
@@ -1528,7 +1616,74 @@ mod tests {
             share: String::new(),
             file_stem: String::new(),
             png_name: String::new(),
+        }
+    }
+
+    /// Very long hardware, project and player names stay inside their panel: every text's inked
+    /// pixels lie in the left (15..495) or right (505..985) panel, 15..625 high; only the
+    /// centred "Saved" line at the bottom crosses the divider.
+    #[test]
+    fn long_names_stay_inside_their_panel() {
+        let mut card = sample_card();
+        card.sys = Sys {
+            gpu: "NVIDIA GeForce RTX 5080 Laptop GPU".into(),
+            vram_gb: 16.0,
+            cpu: "AMD Ryzen 9 7950X3D 16-Core Processor".into(),
+            ram_gb: 64.0,
+            os: "Windows 10 Enterprise LTSC 21H2".into(),
         };
+        card.from = "a-rather-long-organisation-name/an-extremely-long-repository-name @ 0123456789ab (declared)".into();
+        card.player = "a-very-long-github-login-name-xx".into();
+        card.serial = "3b8db536".into();
+        card.share = "[KLBF Lab Bench BM-v1] a-rather-long-organisation-name/an-extremely-long-repository-name@0123456789ab | RTX 5080 Laptop GPU | Ryzen 9 7950X3D 16-Core Processor | avg 60.0 fps, 1% low 58.5 | CERTIFIED | 3b8db536".into();
+        card.png_name = "bench-results\\KLBF-Bench-BM-v1-20261126-2104-3b8db536.png".into();
+        card.set.draws_per_frame = 123_456.0;
+        card.set.skipped = 12_345;
+        for gpu in ["NVIDIA GeForce RTX 5080 Laptop GPU", "AVeryLongGpuNameWithoutAnySpacesAtAllThatCannotBeWrappedWordByWordAnywhere"] {
+            card.sys.gpu = gpu.into();
+            let (w, h) = (1280, 820);
+            let (_, boxes) = render_card_boxes(&card, w, h, false);
+            let k = (w as f32 / 1000.0).min(h as f32 / 640.0);
+            let u = |px: i32| px as f32 / k;
+            assert!(boxes.len() > 10);
+            for [x0, y0, x1, y1] in boxes {
+                let (x0, y0, x1, y1) = (u(x0), u(y0), u(x1), u(y1));
+                let rows = y0 >= 15.0 && y1 <= 625.0;
+                let left = x0 >= 15.0 && x1 <= 495.0;
+                let right = x0 >= 505.0 && x1 <= 985.0;
+                let saved = y0 > 600.0 && x0 >= 15.0 && x1 <= 985.0;
+                assert!(rows && (left || right || saved), "text at ({x0:.0}, {y0:.0})-({x1:.0}, {y1:.0}) leaves its panel ({gpu})");
+            }
+        }
+    }
+
+    /// Writes the card of the sample run to `KLBF_CARD_PREVIEW` (a .png path), to look at it.
+    #[test]
+    #[ignore = "writes a file; run with KLBF_CARD_PREVIEW=<file.png>"]
+    fn card_preview() {
+        let mut card = sample_card();
+        card.serial = "3b8db536".into();
+        card.share = "[KLBF Lab Bench BM-v1] PastiiJay/klbf-lab@abc1234 | RX 9070 XT | Ryzen 7 7800X3D | avg 60.0 fps, 1% low 58.5 | CERTIFIED | 3b8db536".into();
+        card.png_name = "bench-results/KLBF-Bench-BM-v1-20261126-2104-3b8db536.png".into();
+        card.from = "PastiiJay/klbf-lab @ abc1234".into();
+        card.date = "26 Nov 2026".into();
+        card.date_short = "26.11.26".into();
+        card.set.draws_per_frame = 8731.0;
+        let out = std::env::var("KLBF_CARD_PREVIEW").expect("KLBF_CARD_PREVIEW=<file.png>");
+        std::fs::write(&out, render_png(&card)).unwrap();
+        // And with long names, next to it.
+        card.sys.gpu = "NVIDIA GeForce RTX 5080 Laptop GPU".into();
+        card.sys.cpu = "AMD Ryzen 9 7950X3D 16-Core Processor".into();
+        card.sys.os = "Windows 10 Enterprise LTSC 21H2".into();
+        card.from = "a-rather-long-organisation-name/an-extremely-long-repository-name @ 0123456789ab (declared)".into();
+        std::fs::write(out.replace(".png", "-long.png"), render_png(&card)).unwrap();
+    }
+
+    /// A result the game writes, byte for byte the fixture `tools/bench-check.py` accepts
+    /// (`python -I tools/bench-check.py crates/victory-gpu/tests/fixtures/KLBF-Bench-BM-v1-3b8db536.json`).
+    #[test]
+    fn result_matches_the_checker_fixture() {
+        let card = sample_card();
         let extra = Extra { black: 0, removed: false, compiled: [3, 7], vram: (9000 << 20, 15000 << 20), ram: 12345 << 20, why: "5:00 reached" };
         let mut doc = result_json(&card, &extra, &[60.0, 57.3, 61.2]);
         let J::O(m) = &mut doc else { unreachable!() };
