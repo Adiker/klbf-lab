@@ -1367,35 +1367,77 @@ fn keep_ui() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_TEXTURE_MAX_DIM_KEEP_UI").is_none_or(|v| v != "0"))
 }
 
-/// A side that is not a power of two (1920x1080, 1280x720...): loading
-/// screens, menus and other flat images; world textures are powers of two.
-// ponytail: size-only guess; a power-of-two menu image is still capped.
-fn looks_like_ui(width: u64, height: u32) -> bool {
-    !width.is_power_of_two() || !height.is_power_of_two()
+/// Flat screen images (loading screens, menus): a side that is not a power
+/// of two (1920x1080...), or a short mip chain (1-3 levels, or 3+ fewer than
+/// a full chain down to the smaller side). World textures are powers of two
+/// with full chains (BC chains may stop at 4x4, hence the smaller side).
+// ponytail: shape-only guess; the debug lines below show what slips through.
+fn looks_like_ui(desc: &ResourceDesc) -> bool {
+    let (w, h) = (desc.width, u64::from(desc.height));
+    let full = u64::from(64 - w.min(h).max(1).leading_zeros());
+    !w.is_power_of_two() || !h.is_power_of_two() || desc.mip_levels <= 3 || u64::from(desc.mip_levels) + 2 < full
 }
 
-/// Textures kept at full size by [`keep_ui`], and the second last logged.
+/// Textures kept at full size by [`keep_ui`], and their bytes.
 #[cfg(windows)]
 static UI_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(windows)]
+static UI_KEPT_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[cfg(windows)]
-fn count_ui_kept() {
+fn count_ui_kept(desc: &ResourceDesc) {
     use std::sync::atomic::Ordering::Relaxed;
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
     static LOGGED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let kept = UI_KEPT.fetch_add(1, Relaxed) + 1;
+    let bytes = UI_KEPT_BYTES.fetch_add(footprint(desc).map_or(0, |f| f.size), Relaxed);
+    if kept <= 20 {
+        log_shape("kept full size", desc);
+    }
     let second = START.get_or_init(std::time::Instant::now).elapsed().as_secs() + 1;
     if LOGGED.swap(second, Relaxed) != second {
-        tracing::info!("texture cap: {kept} kept full size as UI");
+        tracing::info!("texture cap: {kept} kept full size as UI ({} MB)", bytes >> 20);
     }
+}
+
+/// The first 20 textures the cap shrinks, at debug level.
+#[cfg(windows)]
+fn count_capped(desc: &ResourceDesc) {
+    static CAPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    if CAPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 20 {
+        log_shape("capped", desc);
+    }
+}
+
+#[cfg(windows)]
+fn log_shape(what: &str, d: &ResourceDesc) {
+    tracing::debug!("texture cap: {what} {}x{} mips {} format {}", d.width, d.height, d.mip_levels, d.format);
 }
 
 #[test]
 fn ui_guess() {
-    assert!(looks_like_ui(1920, 1080));
-    assert!(looks_like_ui(1280, 720));
-    assert!(!looks_like_ui(1024, 512));
-    assert!(!looks_like_ui(2048, 2048));
+    let tex = |width, height, mip_levels| ResourceDesc {
+        dimension: 3,
+        alignment: 0,
+        width,
+        height,
+        depth_or_array_size: 1,
+        mip_levels,
+        format: 98,
+        sample_count: 1,
+        sample_quality: 0,
+        layout: 0,
+        flags: 0,
+    };
+    assert!(looks_like_ui(&tex(1920, 1080, 11)));
+    assert!(looks_like_ui(&tex(1280, 720, 1)));
+    assert!(looks_like_ui(&tex(2048, 1024, 1)));
+    assert!(looks_like_ui(&tex(4096, 2048, 3)));
+    assert!(looks_like_ui(&tex(2048, 2048, 6)));
+    assert!(!looks_like_ui(&tex(1024, 512, 10)));
+    assert!(!looks_like_ui(&tex(2048, 2048, 12)));
+    assert!(!looks_like_ui(&tex(2048, 2048, 10)));
+    assert!(!looks_like_ui(&tex(4096, 2048, 10)));
 }
 
 /// A host description that starts later in the title's mip chain. These
@@ -1488,11 +1530,12 @@ fn hosted(this: This, make: bool) -> Option<Made> {
             && clear.is_null()
             && let Some(limit) = texture_max_dim()
             && let Some(compact) = capped_texture(&r.desc, limit)
-            && !(keep_ui() && looks_like_ui(r.desc.width, r.desc.height) && {
-                count_ui_kept();
+            && !(keep_ui() && looks_like_ui(&r.desc) && {
+                count_ui_kept(&r.desc);
                 true
             })
         {
+            count_capped(&r.desc);
             texture = host_texture(&compact, r.host.state, clear);
         }
         #[cfg(feature = "diagnostics")]
