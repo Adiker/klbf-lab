@@ -12,7 +12,7 @@
 //!
 //! - `VICTORY_SKIP_PIPELINES` (and the built-in list) is honoured as in a run.
 //! - Resumable: the library is saved every [`SAVE_EVERY`] pipelines made
-//!   (and every minute), and the keys it then holds are listed in
+//!   (and every [`SAVE_SECS`] seconds, and after a crash's suspects), and the keys it then holds are listed in
 //!   `prebuilt-pipelines.txt` beside it (valid while the library file is
 //!   at least the size on its first line: a run only adds to it); a next
 //!   pre-build skips those.
@@ -59,8 +59,13 @@ const LIST_FILE: &str = "prebuilt-pipelines.txt";
 const INFLIGHT_FILE: &str = "prebuild-inflight.txt";
 /// The keys the host driver died on, made alone: skipped.
 const CRASHED_FILE: &str = "prebuild-crashed.txt";
-/// Pipelines made between two saves of the library, at most.
-const SAVE_EVERY: usize = 200;
+/// Pipelines made between two saves of the library, at most. Small: where
+/// the host driver dies every hundred or so pipelines, a pass that saved
+/// every 200 kept nothing of its work and only one culprit was found every
+/// two passes.
+const SAVE_EVERY: usize = 32;
+/// Seconds between two saves of the library, at most.
+const SAVE_SECS: u64 = 10;
 
 pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     let paths = crate::default_paths(paths)?;
@@ -271,6 +276,10 @@ pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
     };
     // The suspects of a crash, alone: the one the driver dies on is named.
     first.iter().for_each(|&job| make_one(job));
+    // Kept before the many threads start: the next crash does not take them along.
+    if !first.is_empty() {
+        save(&dir, &pending, &mut listed);
+    }
     std::thread::scope(|s| {
         let workers: Vec<_> = (0..threads.min(todo.len()))
             .map(|_| {
@@ -284,7 +293,7 @@ pub fn run(paths: Vec<PathBuf>, jobs: Option<usize>) -> Result<()> {
         let mut last_save = Instant::now();
         while !workers.iter().all(|w| w.is_finished()) {
             std::thread::sleep(Duration::from_millis(250));
-            if last_save.elapsed() >= Duration::from_secs(60) || lock(&pending).len() >= SAVE_EVERY {
+            if last_save.elapsed() >= Duration::from_secs(SAVE_SECS) || lock(&pending).len() >= SAVE_EVERY {
                 {
                     let _alone = gate.write().unwrap_or_else(|e| e.into_inner());
                     save(&dir, &pending, &mut listed);
