@@ -16,11 +16,13 @@ No cherry-picked numbers: these come from ordinary play, not from a quiet scene 
 | Situation | fps |
 |---|---|
 | Standing still, looking at the sky | 20–23 |
-| Standing still in traffic | 15–17 |
-| On foot in the open world | up to 14 (varies with the area) |
-| Driving fast through streets (the world streams in) | 9–12, short dips while new areas load |
+| On foot in a quiet area (by a lake or a river) | 16–21 |
+| Standing still in traffic, busy neighbourhood | 15–17 |
+| On foot on a motorway slip road | 15–16 |
+| On foot in a busy neighbourhood | up to 14 |
+| Driving over a bridge above water | up to 17 |
 | Driving a truck at moderate speed | up to 15 |
-| Driving over a bridge above water (little to load) | up to 17 |
+| Driving fast through streets (the world streams in) | 9–12, short dips while new areas load |
 
 Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable.
 
@@ -29,6 +31,7 @@ Route: start at the male lead's house right after first arriving there (~3% prog
 Known issues:
 - Occasional freezes when the card or PC memory fills (try `-LowMemory`).
 - Some shadows flicker near trees; very distant trees sometimes flash black.
+- Lake water sometimes flickers or disappears.
 - Mirrors stay black (they need ray tracing).
 - Car windows (glass) are not drawn: you can break into a car but the glass is invisible.
 - Resolution is Series S, upscaled.
