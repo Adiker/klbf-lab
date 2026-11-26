@@ -13,6 +13,8 @@ KLBF Lab is a test build of a compatibility layer that runs an Xbox Series title
 
 No cherry-picked numbers: these come from ordinary play, not from a quiet scene chosen to look good (scenes with only open water run higher). Measured during a real play session (controller), RX 9070 XT 16 GB, Ryzen 7 9800X3D, 32 GB RAM, Series S profile + FSR 4, the settings of [`play.ps1`](play.ps1):
 
+**Frame rate seen in the world** (peaks by situation)
+
 | Situation | fps |
 |---|---|
 | Standing still, looking at the sky | up to 27 |
@@ -24,7 +26,7 @@ No cherry-picked numbers: these come from ordinary play, not from a quiet scene 
 | Driving a truck at moderate speed | up to 15 |
 | Driving fast through streets (the world streams in) | up to 12 |
 
-How the frame rate is spread over a 16-minute real play session (182 one-second samples, on foot and driving), average **13 fps**:
+**Stability index**: how the frame rate is spread over a 16-minute real play session (182 one-second samples, on foot and driving), average **13 fps**:
 
 | fps | Share of the time |
 |---|---|
@@ -35,7 +37,7 @@ How the frame rate is spread over a 16-minute real play session (182 one-second 
 | 5–9 | 8 % |
 | under 5 (freezes) | 6 % |
 
-Same session: average 13.2 fps, median 13.2, 5 % low 1.7, 1 % low 0.2 (the lows are the freezes; samples are one-second averages).
+**Average performance index**, same session: average 13.2 fps, median 13.2, 5 % low 1.7, 1 % low 0.2 (the lows are the freezes; samples are one-second averages).
 
 Occasional short freezes in any situation (on foot or driving); they do not crash the game and it stays playable. We are working on them now.
 
