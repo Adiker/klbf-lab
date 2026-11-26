@@ -1336,7 +1336,7 @@ fn ink_width(m: &Mask) -> f32 {
 }
 
 /// `s` split at `sep` into lines no wider than `max_w` units at `size`; a part too wide alone is
-/// split word by word.
+/// split word by word (after a space or a `/`).
 fn wrap(pen: &Pen, font: Font, size: f32, s: &str, sep: &str, max_w: f32) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
     for part in s.split(sep) {
@@ -1352,15 +1352,15 @@ fn wrap(pen: &Pen, font: Font, size: f32, s: &str, sep: &str, max_w: f32) -> Vec
             continue;
         }
         let mut fresh = true;
-        for word in part.split(' ') {
+        for word in part.split_inclusive([' ', '/']) {
             match lines.last_mut() {
-                Some(last) if !fresh && pen.width(font, size, &format!("{last} {word}")) <= max_w => {
-                    last.push(' ');
-                    last.push_str(word);
-                }
+                Some(last) if !fresh && pen.width(font, size, format!("{last}{word}").trim_end()) <= max_w => last.push_str(word),
                 _ => lines.push(word.to_string()),
             }
             fresh = false;
+        }
+        for line in lines.iter_mut() {
+            line.truncate(line.trim_end().len());
         }
     }
     lines
