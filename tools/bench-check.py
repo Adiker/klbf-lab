@@ -1,15 +1,18 @@
 # Checks one KLBF Lab Bench BM-v1 result file and prints its row for docs/klbf/BAYSIDE-MORNING-V1.md.
-# Usage: python -I tools/bench-check.py KLBF-Bench-BM-v1-<serial>.json
+# Usage: python -I tools/bench-check.py KLBF-Bench-BM-v1-<serial>.json [--login <GitHub login>] [--card <URL>]
 # Exit 0 and one table row when the result is acceptable; exit 1 and the problems otherwise.
 # Mirrors the game side (crates/victory-gpu/src/klbf_bench.rs): same fields, same verdict rules.
-# The serial itself hashes every frame time, which the JSON does not carry, so it can only be
-# checked for shape and against the file name and the share line, not recomputed.
-import json, math, re, sys
+# Serial (schema 1): the first 8 hex of SHA-256 over the canonical JSON without the serial and share
+# fields (the share line carries the serial):
+# keys sorted, separators (',', ':'), UTF-8 (non-ASCII kept), numbers as Python writes them back.
+# --login: the submitter; the player on the card must be that login or "anonymous".
+# --card: the card PNG attached to the submission issue.
+import argparse, hashlib, json, math, re, sys
 from pathlib import Path
 
 TARGET_S = 300
 FIELDS = {
-    'bench': str, 'test': str, 'test_id': str, 'stamp': str, 'reason': str, 'stop': str, 'serial': str,
+    'schema': int, 'bench': str, 'test': str, 'test_id': str, 'stamp': str, 'reason': str, 'stop': str, 'serial': str,
     'date': str, 'project': str, 'project_source': str, 'sha': str, 'player': str, 'gpu': str,
     'gpu_vram_gb': (int, float), 'cpu': str, 'ram_gb': (int, float), 'os': str, 'duration_s': (int, float),
     'target_s': int, 'frames': int, 'fps': dict, 'pct_time_ge_12fps': (int, float),
@@ -20,12 +23,19 @@ FPS = ('avg', 'median', 'low_1pct', 'low_5pct', 'min', 'max')
 # Quality settings the result may record (optional; shown in the Settings column when present).
 SETTINGS = (('profile', 'profile {}'), ('upscaler', '{}'), ('texture_cap_mb', 'textures ≤ {} MB'),
             ('pipelines_skipped', '{} pipelines skipped'), ('pipelines_denied', '{} pipelines denied'),
-            ('draws_per_frame', '{} draws/frame'))
+            ('draws_per_frame', '{} draws/frame'), ('dropped_draws_pct', '{} % draws dropped'))
+CARD = 'https://github.com/user-attachments/'
 LOGIN = re.compile(r'^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$')
 R2 = 0.005  # half a unit of the 2 decimals the game writes
 
 
-def check(d, name=None):
+def serial(d):
+    canon = json.dumps({k: v for k, v in d.items() if k not in ('serial', 'share')}, sort_keys=True, separators=(',', ':'),
+                       ensure_ascii=False)
+    return hashlib.sha256(canon.encode('utf-8')).hexdigest()[:8]
+
+
+def check(d, name=None, login=None):
     """Every problem with one parsed result; empty when it is acceptable."""
     if not isinstance(d, dict):
         return ['not a JSON object']
@@ -36,7 +46,7 @@ def check(d, name=None):
           if not isinstance(fps.get(k), (int, float)) or isinstance(fps.get(k), bool) or not math.isfinite(fps[k])]
     if p:
         return p
-    if (d['bench'], d['test'], d['test_id']) != ('KLBF Lab Bench', 'Bayside Morning v1', 'BM-v1'):
+    if (d['schema'], d['bench'], d['test'], d['test_id']) != (1, 'KLBF Lab Bench', 'Bayside Morning v1', 'BM-v1'):
         p.append('not a BM-v1 result')
     # Duration: the full 5:00 from the first world frame.
     if d['target_s'] != TARGET_S or d['duration_s'] < TARGET_S or d['stop'] != '5:00 reached':
@@ -71,14 +81,16 @@ def check(d, name=None):
     fz = d['freezes_over_200ms']
     if not 0 <= fz <= n or (fz > 0 and longest <= 200 - 0.05) or (fz == 0 and longest > 200 + 0.05):
         p.append('freeze count does not match the longest frame')
-    # Serial: 8 hex, the same in the file name and the share line.
+    # Serial: the content hash, the same in the file name and the share line.
     s = d['serial']
-    if not re.fullmatch(r'[0-9a-f]{8}', s):
-        p.append('serial is not 8 hex characters')
+    if s != serial(d):
+        p.append(f'serial {s} does not match the content (expected {serial(d)}): the file was changed')
     if name is not None and Path(name).name != f'KLBF-Bench-BM-v1-{s}.json':
         p.append(f'file name does not match serial {s}')
     if not d['share'].endswith(f"| {d['stamp']} | {s}") or f"{d['project']}@{d['sha']}" not in d['share']:
         p.append('share line does not match the result')
+    if login is not None and d['player'] != 'anonymous' and d['player'].lower() != login.lower():
+        p.append(f"player '{d['player']}' is not the submitter's GitHub login ({login}) or 'anonymous'")
     return p
 
 
@@ -90,35 +102,40 @@ def settings(d):
     return ' · '.join(f.format(cell(d[k])) for k, f in SETTINGS if d.get(k) not in (None, ''))
 
 
-def row(d, stem):
-    """The board row; stem is the result's path without extension, relative to the board page."""
-    player = cell(d['player']) or 'anonymous'
+def row(d, stem, card=None):
+    """The board row; stem is the result's path without extension, relative to the board page.
+    The player is linked only once check() has matched it to the submitter's login."""
+    player = cell(d['player'])
     if player != 'anonymous' and LOGIN.match(player):
         player = f'[{player}](https://github.com/{player})'
+    proof = f'[JSON]({stem}.json)' + (f' · [card]({card})' if card else '')
     proj, sha = cell(d['project']), cell(d['sha'])
     project = f'[{proj} @ {sha}](https://github.com/{proj}/tree/{sha})' if d['project_source'] == 'git' else f'{proj} @ {sha}'
     a = d['fps']
     return ' | '.join([
         '', player, project, f"{cell(d['gpu'])} {d['gpu_vram_gb']:.0f} GB", cell(d['cpu']), f"{d['ram_gb']:.0f} GB",
         f"{a['avg']:.1f}", f"{a['median']:.1f}", f"{a['low_1pct']:.1f}", f"{d['pct_time_ge_12fps']:.1f}",
-        settings(d), cell(d['date'])[:10], f'[JSON]({stem}.json) · [card]({stem}.png)', '']).strip()
+        settings(d), cell(d['date'])[:10], proof, '']).strip()
 
 
 def main():
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
-    if len(sys.argv) != 2:
-        sys.exit('usage: python -I tools/bench-check.py KLBF-Bench-BM-v1-<serial>.json')
-    path = Path(sys.argv[1])
+    ap = argparse.ArgumentParser()
+    ap.add_argument('json'); ap.add_argument('--login'); ap.add_argument('--card')
+    a = ap.parse_args()
+    if a.card and not a.card.startswith(CARD):
+        sys.exit(f'--card must be an image attached on GitHub ({CARD}...)')
+    path = Path(a.json)
     try:
         d = json.loads(path.read_text(encoding='utf-8-sig'))
     except (OSError, ValueError) as e:
         sys.exit(f'{path}: {e}')
-    problems = check(d, path.name)
+    problems = check(d, path.name, a.login)
     if problems:
         print('\n'.join(f'{path.name}: {x}' for x in problems), file=sys.stderr)
         sys.exit(1)
-    print(row(d, f'bench/bm-v1/{path.stem}'))
+    print(row(d, f'bench/bm-v1/{path.stem}', a.card))
 
 
 if __name__ == '__main__':

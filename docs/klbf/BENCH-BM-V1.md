@@ -25,15 +25,15 @@ and keep your save files to yourself: they can carry your console profile's ids.
 
 1. Set the variables (only the first is required):
    - `KLBF_BENCH=bm-v1` turns the bench on. Without it nothing changes.
-   - `KLBF_BENCH_PLAYER=<nickname>` is written on the card (otherwise "anonymous"). To be linked on
-     the board, use your GitHub login.
+   - `KLBF_BENCH_PLAYER=<GitHub login>` is written on the card (otherwise "anonymous"). The board
+     only lists a run whose player is the submitter's GitHub login or "anonymous".
    - `VICTORY_SKIP_MOVIES=end` skips the intro movies.
 2. Start the game, load the save and press **Continue**. If Continue does not bring you to the
    morning save, use **Load** and pick slot 1 (it sits one line lower, under the automatic save).
 3. Touch nothing.
 
 ```powershell
-$env:KLBF_BENCH = "bm-v1"; $env:KLBF_BENCH_PLAYER = "<nickname>"; $env:VICTORY_SKIP_MOVIES = "end"
+$env:KLBF_BENCH = "bm-v1"; $env:KLBF_BENCH_PLAYER = "<GitHub login>"; $env:VICTORY_SKIP_MOVIES = "end"
 ```
 
 The measurement starts at the first world frame. 5 seconds later input is blocked: the game gets an
@@ -47,14 +47,14 @@ exits.
 ## What the card means
 
 - **Left**: the date and how the run ended ("5:00 complete · no input", or "PARTIAL m:ss / 5:00 – not comparable").
-- **Round stamp**: the serial (8 characters, a fingerprint of every frame time and of the result) and
+- **Round stamp**: the serial (8 characters, a SHA-256 fingerprint of the result file) and
   the date. The band across it is the verdict:
   - **CERTIFIED**: the full 5:00, the graphics device kept, at most 1 % black frames, no stall of 10 s
     or more, at least 300 frames.
   - **PARTIAL**: stopped before 5:00. Not comparable.
   - **INVALID**: 5:00 done, but one of the checks failed.
 - **from:** the project and version (`owner/repo @ commit`), read from git at build time; "(declared)"
-  when given by `KLBF_PROJECT_NAME`, "unknown (local build)" otherwise. Below it, the nickname.
+  when given by `KLBF_PROJECT_NAME`, "unknown (local build)" otherwise. Below it, the player.
 - **Big number**: average fps.
 - **Four boxes**: median fps; 1 % low (average of the slowest 1 % of frames); max fps; time ≥ 12 fps
   (share of the time spent at 12 fps or more).
@@ -73,7 +73,7 @@ Your results stay on your machine unless you choose to share or submit them.
 - **To share**: post the card PNG with the share line from the `.txt` under it, on Fluxer or in a
   GitHub comment. For example:
   `[KLBF Lab Bench BM-v1] owner/repo@abc1234 | RX 9070 XT | Ryzen 7 9800X3D | avg 14.2 fps, 1% low 2.2 | CERTIFIED | 8e45f78d`
-- **To appear on the board**: submit the JSON and the card PNG through the
+- **To appear on the board**: submit the JSON and attach the card PNG through the
   [result form](https://github.com/PastiiJay/klbf-lab/issues/new?template=bench-bm-v1.yml). Only
   CERTIFIED results are listed. Each one is checked with `python -I tools/bench-check.py <file>.json`.
 

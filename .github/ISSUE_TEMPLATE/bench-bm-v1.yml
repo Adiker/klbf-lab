@@ -8,11 +8,12 @@ body:
       value: |
         Run the bench as described in [docs/klbf/BENCH-BM-V1.md](https://github.com/PastiiJay/klbf-lab/blob/main/docs/klbf/BENCH-BM-V1.md), then attach the files from `bench-results` next to the exe.
         Only the card PNG, please: no screenshots of the game.
+        The player on the card (`KLBF_BENCH_PLAYER`) must be **your GitHub login** or `anonymous`; any other name is not listed.
   - type: input
     id: nickname
     attributes:
       label: Nickname
-      description: Optional. Leave empty to appear as "anonymous".
+      description: Optional. Your GitHub login (as on the card), or leave empty if the card says "anonymous". No other names.
     validations:
       required: false
   - type: input

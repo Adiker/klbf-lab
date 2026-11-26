@@ -14,7 +14,7 @@ spec.loader.exec_module(bc)
 
 # 18,000 frames at 60 fps = 300 s; slowest frame 33.3 ms.
 VALID = {
-    "bench": "KLBF Lab Bench", "test": "Bayside Morning v1", "test_id": "BM-v1",
+    "schema": 1, "bench": "KLBF Lab Bench", "test": "Bayside Morning v1", "test_id": "BM-v1",
     "stamp": "CERTIFIED", "reason": "5:00 complete · no input", "stop": "5:00 reached",
     "serial": "8e45f78d", "date": "2026-11-26T21:04:05",
     "project": "PastiiJay/klbf-lab", "project_source": "git", "sha": "abc1234", "player": "PastiiJay",
@@ -29,7 +29,9 @@ VALID = {
     "share": "[KLBF Lab Bench BM-v1] PastiiJay/klbf-lab@abc1234 | RX 9070 XT | Ryzen 7 9800X3D | "
              "avg 60.0 fps, 1% low 40.0 | CERTIFIED | 8e45f78d",
 }
-NAME = 'KLBF-Bench-BM-v1-8e45f78d.json'
+VALID["serial"] = SERIAL = bc.serial(VALID)
+VALID["share"] = VALID["share"].replace("8e45f78d", SERIAL)
+NAME = f'KLBF-Bench-BM-v1-{SERIAL}.json'
 
 
 def tampered(**changes):
@@ -55,23 +57,39 @@ class BenchCheckTests(unittest.TestCase):
             'min not from longest frame': tampered(fps_min=50.0),
             'other version': tampered(test_id='BM-v2'),
             'serial edited': tampered(serial='deadbeef'),
+            'figure edited, serial kept': tampered(frames=18001),
+            'no schema': {k: v for k, v in VALID.items() if k != 'schema'},
             'missing field': {k: v for k, v in VALID.items() if k != 'frames'},
         }
         for label, d in cases.items():
             with self.subTest(label):
                 self.assertNotEqual(bc.check(d, NAME), [])
         self.assertNotEqual(bc.check(VALID, 'KLBF-Bench-BM-v1-00000000.json'), [])
+        self.assertNotEqual(bc.check(VALID, NAME, login='someone-else'), [])
+        self.assertEqual(bc.check(VALID, NAME, login='pastiijay'), [])
+        anonymous = tampered(player='anonymous')
+        anonymous['serial'] = bc.serial(anonymous)
+        anonymous['share'] = anonymous['share'].replace(SERIAL, anonymous['serial'])
+        self.assertEqual(bc.check(anonymous, f"KLBF-Bench-BM-v1-{anonymous['serial']}.json", login='someone-else'), [])
+
+    def test_serial_is_sha256_of_canonical_json(self):
+        import hashlib
+        rest = {k: v for k, v in VALID.items() if k not in ('serial', 'share')}
+        canon = json.dumps(rest, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
+        self.assertEqual(SERIAL, hashlib.sha256(canon).hexdigest()[:8])
 
     def test_cli_prints_one_row(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / NAME
             path.write_text(json.dumps(VALID), encoding='utf8')
-            out = subprocess.run([sys.executable, '-I', str(Path(__file__).with_name('bench-check.py')), str(path)],
+            out = subprocess.run([sys.executable, '-I', str(Path(__file__).with_name('bench-check.py')), str(path),
+                                  '--login', 'PastiiJay', '--card', 'https://github.com/user-attachments/assets/x'],
                                  capture_output=True, text=True, encoding='utf8')
+            self.assertIn('[card](https://github.com/user-attachments/assets/x)', out.stdout)
             self.assertEqual(out.returncode, 0, out.stderr)
             self.assertEqual(len(out.stdout.strip().splitlines()), 1)
             self.assertIn('[PastiiJay](https://github.com/PastiiJay)', out.stdout)
-            self.assertIn('bench/bm-v1/KLBF-Bench-BM-v1-8e45f78d.png', out.stdout)
+            self.assertIn(f'bench/bm-v1/{Path(NAME).stem}.json', out.stdout)
             path.write_text(json.dumps(tampered(fps_avg=90.0)), encoding='utf8')
             bad = subprocess.run([sys.executable, '-I', str(Path(__file__).with_name('bench-check.py')), str(path)],
                                  capture_output=True, text=True, encoding='utf8')
@@ -81,6 +99,7 @@ class BenchCheckTests(unittest.TestCase):
         self.assertEqual(bc.settings(VALID), '')
         self.assertEqual(bc.settings(tampered(profile='S', upscaler='FSR', draws_per_frame=6500)),
                          'profile S · FSR · 6500 draws/frame')
+        self.assertEqual(bc.settings(tampered(dropped_draws_pct=1.5)), '1.5 % draws dropped')
 
 
 if __name__ == '__main__':
