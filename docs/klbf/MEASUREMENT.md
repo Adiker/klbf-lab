@@ -8,20 +8,24 @@ Every project reports frame rates from different places and in different ways: a
 
 ### Keep your morning save
 
-Make it once, then keep a copy so every later run (and every new build) starts from exactly the same point:
+The game has one automatic save plus 15 manual slots (16 in all). Make the morning save **in a manual slot** and note its number (for example slot 3): the automatic save is overwritten as soon as you play on, a manual slot is not.
 
-1. Your saves live in the data folder you set with `VICTORY_DATA_DIR`, in `<title id>\saves` (the title id is the folder with an 8-character hex name).
-2. Right after making the morning save, quit the game and copy that `saves` folder somewhere safe, for example `benchmark-morning`.
-3. Before each measured run: quit the game, replace the `saves` folder with your copy, then start the game and load the morning save.
+All 16 live together in one `saves` folder, inside the data folder you set with `VICTORY_DATA_DIR`, in `<title id>\saves` (the title id is the folder with an 8-character hex name). Copying that folder keeps both the automatic save and your numbered slot:
 
-In PowerShell (adapt the two paths):
+1. Right after making the morning save, quit the game and copy the `saves` folder somewhere safe, for example `D:\benchmark-morning`.
+2. Before each measured run: quit the game, put your copy back in place of the `saves` folder, start the game, then **Load** and pick the slot number you noted. (Continue would load the automatic save instead.)
+
+In PowerShell (put your own title id in place of `<title id>`):
 
 ```powershell
-Copy-Item -Recurse "$env:VICTORY_DATA_DIR\<title id>\saves" "D:enchmark-morning"                      # once, after the morning save
-Remove-Item -Recurse "$env:VICTORY_DATA_DIR\<title id>\saves"; Copy-Item -Recurse "D:enchmark-morning" "$env:VICTORY_DATA_DIR\<title id>\saves"   # before each run
+Copy-Item -Recurse "$env:VICTORY_DATA_DIR\<title id>\saves" "D:\benchmark-morning"
 ```
 
-Keep your own copy: don't share save files, they can carry your console profile's ids.
+```powershell
+Remove-Item -Recurse "$env:VICTORY_DATA_DIR\<title id>\saves"; Copy-Item -Recurse "D:\benchmark-morning" "$env:VICTORY_DATA_DIR\<title id>\saves"
+```
+
+The first command runs once, after the morning save; the second before each run. Keep your copy to yourself: save files can carry your console profile's ids.
 
 ## What to play: the standard drive
 
