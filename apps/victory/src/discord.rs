@@ -1,7 +1,7 @@
 //! (Neptune) Discord Rich Presence while a title runs: the title being played, with
 //! the time played, through the Discord client's own pipe on this PC (`\\.\pipe\discord-ipc-N`).
 //! Nothing goes over the network from here, and nothing happens if Discord is not running.
-//! `VICTORY_DISCORD=0` turns it off; `VICTORY_DISCORD_APP` names another application id.
+//! Off unless `VICTORY_DISCORD=1`; `VICTORY_DISCORD_APP` names another application id.
 //! The picture is the application's Rich Presence art asset named `logo`.
 
 use std::io::{Read, Write};
@@ -53,7 +53,7 @@ fn connect(application: &str, started: u64) -> Option<std::fs::File> {
 
 /// Starts the presence on a thread of its own, for as long as the process lives.
 pub fn start() {
-    if std::env::var_os("VICTORY_DISCORD").is_some_and(|v| v == "0") {
+    if std::env::var_os("VICTORY_DISCORD").is_none_or(|v| v != "1") {
         return;
     }
     let application = std::env::var("VICTORY_DISCORD_APP").unwrap_or_else(|_| APPLICATION.to_owned());
