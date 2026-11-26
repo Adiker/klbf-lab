@@ -94,6 +94,8 @@ If the world takes seconds a frame under Wine/Proton while the GPU is mostly idl
 
 A `wineserver` that keeps the views in a tree fixes it: [CachyOS/wine-cachyos#50](https://github.com/CachyOS/wine-cachyos/pull/50) (by ajsem1337, based on neonbyte1's version; also measured in [fxceless/victory-fork#184](https://github.com/fxceless/victory-fork/issues/184)). It changes only `server/`, so it can be built for the Wine of your Proton and dropped into a copy of that Proton as `files/bin/wineserver`; the server protocol version must match the Proton build (regenerate `server_protocol.h` with `tools/make_requests` before building). On an RX 6900 XT with Proton Experimental 11.0-20261112, same build and settings, the first minutes in the world went from 2,068 to 509 ms a frame (textures 482 → 73 ms, copies 417 → 99 ms) and `wineserver` from ~70 % to ~6 % of a core.
 
+Frame captures (`VICTORY_CAPTURE_WORLD`) cost about 235 ms each on the submitting thread (measured under Proton on an RX 6900 XT). For a speed run, `unset VICTORY_CAPTURE_WORLD` before launch: the switch checks only whether the variable is set, so `0` still captures.
+
 ## Which settings for my PC?
 
 From what testers have reported so far. To measure and compare on your machine, run the BM-v1 bench (see "New in Lab 63").
