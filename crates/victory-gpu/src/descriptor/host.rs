@@ -959,6 +959,18 @@ pub(crate) fn probe_view_limit() {
 /// table past them is made afresh in these slots like any other.
 pub(crate) const DYNAMIC: u32 = 1 << 18;
 
+/// (KLBF) Dynamic slots asked for (`VICTORY_DYNAMIC_SLOTS`; unset: [`DYNAMIC`], as before).
+/// On a host whose view heaps are [`UNCAPPED_VIEWS`] (AMD: 2,097,152) the title's heap and
+/// [`DYNAMIC`] leave some 800,000 slots unused while draws are dropped for want of a table
+/// (37 a frame turning the camera, run yvan-nep25q-noahead-0935). More than [`DYNAMIC`] is
+/// only taken from the room past the title's slots: never fewer title slots than before.
+fn dynamic_wanted() -> u32 {
+    static N: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("VICTORY_DYNAMIC_SLOTS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(DYNAMIC)
+    })
+}
+
 /// (Neptune) Since the last line in the log: tables that waited for slots, the microseconds
 /// they waited, and tables given up (their draws not drawn).
 pub(crate) static DYNAMIC_WAITS: [std::sync::atomic::AtomicU64; 3] = [const { std::sync::atomic::AtomicU64::new(0) }; 3];
@@ -1003,7 +1015,7 @@ impl HostHeap {
                     })
             }
         };
-        let extra = if sampler { 0 } else { DYNAMIC };
+        let mut extra = if sampler { 0 } else { DYNAMIC };
         // A view heap ends at the null slot shaders clamp view indices to
         // (`probe_view_limit`), whatever the title's own count: the title's
         // slots, then the dynamic ones, then null up to and with that slot.
@@ -1015,6 +1027,10 @@ impl HostHeap {
         } else {
             victory_shader::emit::view_heap_limit()
         };
+        if !sampler && null != 0 && dynamic_wanted() > DYNAMIC {
+            extra = dynamic_wanted().min(null.saturating_sub(count)).max(DYNAMIC);
+            tracing::info!(extra, count, "dynamic descriptor slots (VICTORY_DYNAMIC_SLOTS)");
+        }
         let (heap, count, size) = if null == 0 {
             match make(count + extra) {
                 Ok(heap) => (heap, count, count + extra),
@@ -1051,7 +1067,7 @@ impl HostHeap {
         tracing::debug!(count, sampler, "host descriptor heap");
         // The null slot every index past the heap reads is the heap's last,
         // past the dynamic slots (`probe_view_limit`): all of them are free.
-        let taken = vec![false; DYNAMIC as usize];
+        let taken = vec![false; extra as usize];
         // SAFETY: a live shader-visible heap.
         let gpu = unsafe { heap.GetGPUDescriptorHandleForHeapStart().ptr };
         GPU_RANGES.lock().unwrap_or_else(|e| e.into_inner()).push((
@@ -1085,7 +1101,7 @@ impl HostHeap {
             made_too: (0..count).map(|_| std::sync::atomic::AtomicU64::new(0)).collect(),
             kept: (0..count + extra).map(|_| Mutex::new(None)).collect(),
             next: Mutex::new((0, taken)),
-            free: std::sync::atomic::AtomicU32::new(DYNAMIC - 1),
+            free: std::sync::atomic::AtomicU32::new(extra.saturating_sub(1)),
             too_long: std::sync::atomic::AtomicU32::new(u32::MAX),
             strides,
             buffers: Mutex::default(),
@@ -1263,7 +1279,7 @@ impl HostHeap {
         crate::copystat::add(crate::copystat::C::DynamicNs, started.elapsed().as_nanos() as u64);
         taken[first..first + n].fill(true);
         self.free.fetch_sub(n as u32, std::sync::atomic::Ordering::Relaxed);
-        *next = ((first + n) % DYNAMIC as usize) as u32;
+        *next = ((first + n) % self.dynamic as usize) as u32;
         Some(self.count + first as u32)
     }
 
