@@ -33,7 +33,7 @@ We propose a shared way to measure, so that every project can compare on equal f
 | Driving fast through streets (the world streams in) | up to 12 |
 
 <!-- live-start -->
-**Stability index**: how the frame rate is spread over a real play session of **37 minutes without a crash** (385 samples, on foot and driving):
+**Stability index**: how the frame rate is spread over a real play session still running, **37 minutes so far without a crash** (385 samples, on foot and driving; updated every 5 minutes of play):
 
 | fps | Share of the time |
 |---|---|
