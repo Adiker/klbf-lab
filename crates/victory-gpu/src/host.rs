@@ -2507,6 +2507,8 @@ struct Deferred {
     /// (Neptune, from ab86ef7f there) The pipelines [`HostList::bind_pipeline`] kept, by
     /// address.
     bound: std::collections::HashSet<usize>,
+    /// (Neptune) [`HostList::wants_ahead`].
+    wants_ahead: bool,
     /// Textures whose contents the list brings up to date.
     textures: std::collections::HashSet<usize>,
     /// Bottom-of-pipe writes, done once the list has run: address, what,
@@ -7097,6 +7099,17 @@ impl HostList {
         }
     }
 
+    /// (Neptune) The list's draws read what the list ahead of their frame makes ready
+    /// (`crate::draw::passes_ahead`): its submission goes behind that list.
+    pub(crate) fn wants_ahead(&self) {
+        self.deferred().wants_ahead = true;
+    }
+
+    /// [`HostList::wants_ahead`], as recorded.
+    pub(crate) fn wanted_ahead(&self) -> bool {
+        self.deferred().wants_ahead
+    }
+
     /// Shaders of the list write `[address, address + len)` of a buffer's
     /// host copy: copied back into title memory once the list has run.
     pub(crate) fn defer_gpu_write(
@@ -7396,9 +7409,26 @@ impl HostList {
     fn run_deferred(&self, batch: &mut Batch) {
         #[cfg(feature = "diagnostics")]
         use crate::copystat::{C, add};
+        let wide_fills = wide_fills();
+        if wide_textures() {
+            // (Neptune) The list's textures, up to its first step that writes title memory,
+            // together and ahead of its steps: nothing before that step changes what they
+            // read, and a step of our own code right behind a texture's (the note of an
+            // upload with levels on demand) finds it done. Where they are named they are
+            // then found up to date.
+            for step in &self.deferred().copies {
+                match step {
+                    Step::Copy(..) | Step::Run(_) => break,
+                    Step::Texture(staging) if batch.texture_due(staging) => batch.due.push(Wide(staging.clone())),
+                    _ => {}
+                }
+            }
+            batch.refresh_textures();
+        }
         for step in &self.deferred().copies {
-            let started = std::time::Instant::now();
-            let copied = match step {
+            // (Neptune) The clock is read for the steps that copy here: it was read for
+            // every step, tens of thousands a frame (14 of 400 samples, run ve174).
+            let (copied, started) = match step {
                 &Step::Copy(dst, src, len) => {
                     #[cfg(feature = "diagnostics")]
                     {
@@ -7406,10 +7436,11 @@ impl HostList {
                         add(C::CopyBytes, len as u64);
                     }
                     batch.title_written();
+                    let started = std::time::Instant::now();
                     copy_mapped(dst as *mut u8, src as *const u8, len, true);
                     // With the submission's one asking: the journal learns it.
                     crate::watch::wrote(dst, len);
-                    len
+                    (len, started)
                 }
                 &Step::Fill(dst, src, len, _) => {
                     #[cfg(feature = "diagnostics")]
@@ -7417,8 +7448,13 @@ impl HostList {
                         add(C::Copies, 1);
                         add(C::CopyBytes, len as u64);
                     }
+                    if wide_fills {
+                        batch.fills.push((dst, src, len));
+                        continue;
+                    }
+                    let started = std::time::Instant::now();
                     copy_mapped(dst as *mut u8, src as *const u8, len, false);
-                    len
+                    (len, started)
                 }
                 Step::Refresh(shadow, address, len) => {
                     #[cfg(feature = "diagnostics")]
@@ -7430,8 +7466,13 @@ impl HostList {
                     continue;
                 }
                 Step::Run(work) | Step::Host(work) => {
+                    #[cfg(feature = "diagnostics")]
+                    let started = std::time::Instant::now();
                     if matches!(step, Step::Run(_)) {
                         batch.title_written();
+                    } else {
+                        // (Code of ours may read what the fills before it put there.)
+                        batch.fill();
                     }
                     work();
                     // It wrote title memory, where is not known here: the
@@ -7511,6 +7552,49 @@ struct Batch {
     index: std::collections::HashMap<usize, usize>,
     /// Staging buffers (by address) refreshed since the last title write.
     textures: std::collections::HashSet<usize>,
+    /// (Neptune, from avatarmanz/VIctory-7900XTX) Textures to bring up to date, together
+    /// ([`wide_textures`]).
+    due: Vec<Wide<std::sync::Arc<crate::texture::Staging>>>,
+    /// (Neptune, from avatarmanz/VIctory-7900XTX) Fills of upload memory to do, together
+    /// ([`wide_fills`]): destination, source, bytes.
+    fills: Vec<(usize, usize, usize)>,
+}
+
+/// (Neptune) Something handed to the threads a submission shares its work with: each piece
+/// goes to one thread, which the submitting thread waits for.
+struct Wide<T>(T);
+
+// SAFETY: see above; what is inside has locks of its own for what other threads touch.
+unsafe impl<T> Send for Wide<T> {}
+
+/// (Neptune, from avatarmanz/VIctory-7900XTX) Whether a submission's textures are brought up
+/// to date on several threads (`VICTORY_WIDE_TEXTURES=0`: one after the other, where the
+/// lists name them).
+///
+/// They are read, hashed and, if they changed, detiled into their staging buffers: 28 of
+/// 400 samples of the thread that runs the lines (run ve174, 26 of them hashing), with the
+/// list ahead of a frame naming a frame's worth at once. Each has its own buffer, notes and
+/// lock. They are done before the next step that writes title memory, as the copies'
+/// refreshes are, and before the lists go to the card.
+fn wide_textures() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    // (Off unless asked for, `VICTORY_WIDE_TEXTURES=1`: the hashing left the thread that runs
+    // the lines, 26 of 400 samples to 3, and as many went into waiting for the helpers; a
+    // frame took 85.3 ms without and 85.2 with, runs ve181a and ve181b.)
+    *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_TEXTURES").is_some_and(|v| v == "1") && wide_refresh())
+}
+
+/// (Neptune, from avatarmanz/VIctory-7900XTX) Whether the fills of a submission's upload
+/// memory are done together on several threads (`VICTORY_WIDE_FILLS=0`: one after the
+/// other, where the lists name them). Each reads title memory and writes memory of its own
+/// that the card alone reads, when the lists run; they are done before the next step that
+/// writes title memory or runs code of ours, and before the submission goes on.
+fn wide_fills() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    // (Off unless asked for, `VICTORY_WIDE_FILLS=1`: the thread that runs the lines waited
+    // for its helpers 122 of 400 samples with them, 53 without, run ve178 against ve174;
+    // the fills themselves were 13.)
+    *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_FILLS").is_some_and(|v| v == "1") && wide_refresh())
 }
 
 impl Batch {
@@ -7567,7 +7651,64 @@ impl Batch {
         self.textures.clear();
     }
 
+    /// (Neptune) The fills kept are done ([`wide_fills`]).
+    fn fill(&mut self) {
+        const FEW: usize = 64;
+        const PART: usize = 256;
+        if self.fills.is_empty() {
+            return;
+        }
+        let started = std::time::Instant::now();
+        let bytes: usize = self.fills.iter().map(|f| f.2).sum();
+        if self.fills.len() < FEW {
+            for (dst, src, len) in self.fills.drain(..) {
+                copy_mapped(dst as *mut u8, src as *const u8, len, false);
+            }
+        } else {
+            let fills = std::sync::Arc::new(std::mem::take(&mut self.fills));
+            let jobs: Vec<Box<dyn FnOnce() + Send>> = (0..fills.len().div_ceil(PART))
+                .map(|i| {
+                    let fills = fills.clone();
+                    Box::new(move || {
+                        for &(dst, src, len) in fills.iter().skip(i * PART).take(PART) {
+                            copy_mapped(dst as *mut u8, src as *const u8, len, false);
+                        }
+                    }) as Box<dyn FnOnce() + Send>
+                })
+                .collect();
+            crate::shadow::wide_run(jobs);
+        }
+        PREPARING[0].fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
+        PREPARING[1].fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    /// (Neptune) The textures due are brought up to date ([`wide_textures`]).
+    fn refresh_textures(&mut self) {
+        if self.due.len() < 2 {
+            self.due.drain(..).for_each(|staging| staging.0.refresh());
+            return;
+        }
+        // The time counted is the time it took, not the threads' sum.
+        let started = std::time::Instant::now();
+        let before = PREPARING[2].load(Ordering::Relaxed);
+        let jobs: Vec<Box<dyn FnOnce() + Send>> = self
+            .due
+            .drain(..)
+            .map(|staging| {
+                Box::new(move || {
+                    let staging = staging;
+                    staging.0.refresh()
+                }) as Box<dyn FnOnce() + Send>
+            })
+            .collect();
+        crate::shadow::wide_run(jobs);
+        let summed = PREPARING[2].load(Ordering::Relaxed).saturating_sub(before);
+        PREPARING[2].fetch_sub(summed.saturating_sub(started.elapsed().as_micros() as u64), Ordering::Relaxed);
+    }
+
     fn flush(&mut self) {
+        self.fill();
+        self.refresh_textures();
         self.index.clear();
         // One write-watch asking for the copies that lie close together,
         // not one per copy.
@@ -8363,7 +8504,14 @@ impl Meter {
         }
         crate::list::thin::line(frames);
         if crate::draw::passes_ahead() {
-            let [lists, micros] = [0, 1].map(|i| crate::draw::AHEAD_STATS[i].swap(0, Ordering::Relaxed) as f64 / frames);
+            let [lists, micros, since, since_micros] =
+                [0, 1, 2, 3].map(|i| crate::draw::AHEAD_STATS[i].swap(0, Ordering::Relaxed) as f64 / frames);
+            let (lists, micros) = (lists + since, micros + since_micros);
+            tracing::info!(
+                "of the lists ahead of a frame, those of what changed since the buffers' pass (VICTORY_AHEAD_SPLIT=0: none): \
+                 {since:.2} a frame, {:.1} ms a frame of the thread that runs the lines",
+                since_micros / 1000.0
+            );
             tracing::info!(
                 "lists of ours ahead of a frame's first submission, for its passes over the heap's views \
                  (VICTORY_PASSES_AHEAD=0: in the list that asks first): {lists:.2} a frame, {:.1} ms a frame on a \

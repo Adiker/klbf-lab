@@ -335,7 +335,9 @@ fn submit_cut(this: This, lists: &[This]) {
         // from the title's lists (which it may reset before they have run)
         // and come back, with their tables' slots, when they are settled.
         let (taken, order) = crate::list::detach(&lists[..first]);
-        ahead_of_frame(host);
+        if ahead_first() || taken.iter().any(|l| l.host().wanted_ahead()) {
+            ahead_of_frame(host);
+        }
         host.execute_late(taken, order);
     } else if first > 0 {
         let now: Vec<_> = lists[..first]
@@ -625,12 +627,20 @@ pub(crate) fn release_held(all: bool) {
                                 // (`RUNNING`), they do not wait for it.
                                 RUNNING.store(q, Ordering::Release);
                                 drop(held);
-                                ahead_of_frame(host);
+                                // (Neptune) Behind the list ahead of the frame if its draws
+                                // want it: what does not goes on meanwhile (the thread
+                                // waited 15 ms a frame for that list at the frame's first
+                                // submission, run ve174).
+                                if ahead_first() || lists.iter().any(|l| l.host().wanted_ahead()) {
+                                    ahead_of_frame(host);
+                                }
                                 host.execute_late(lists, order);
                                 held = lock(held_of);
                                 RUNNING.store(0, Ordering::Release);
                             } else {
-                                ahead_of_frame(host);
+                                if ahead_first() || lists.iter().any(|l| l.host().wanted_ahead()) {
+                                    ahead_of_frame(host);
+                                }
                                 host.execute_late(lists, order);
                             }
                         } else {
@@ -692,12 +702,14 @@ fn ahead_of_frame(host: &crate::host::Host) {
         return;
     }
     let began = std::time::Instant::now();
+    let mut whole = false;
     let ahead = {
         let mut ahead = lock(&AHEAD.0);
         if ahead.state == 0 {
-            // Not begun (the first frame): recorded here.
+            // Not begun (the first frame): recorded here, all of it.
             drop(ahead);
-            crate::list::ahead_of_frame()
+            whole = true;
+            crate::list::ahead_of_frame(crate::draw::AHEAD_ALL)
         } else {
             while ahead.state == 1 {
                 ahead = AHEAD.1.wait(ahead).unwrap_or_else(|e| e.into_inner());
@@ -712,9 +724,30 @@ fn ahead_of_frame(host: &crate::host::Host) {
         }
     };
     AHEAD_WAITED.fetch_add(began.elapsed().as_micros() as u64, Ordering::Relaxed);
-    if let Some(ahead) = ahead {
-        host.execute_late(vec![ahead], vec![0]);
+    // (Neptune) Behind the buffers' pass, recorded early: what the title wrote since
+    // ([`ahead_split`]), as one submission with it.
+    let since = if ahead_split() && !whole { crate::list::ahead_of_frame(crate::draw::AHEAD_SINCE) } else { None };
+    let lists: Vec<crate::list::Detached> = ahead.into_iter().chain(since).collect();
+    if !lists.is_empty() {
+        let order = (0..lists.len()).collect();
+        host.execute_late(lists, order);
     }
+}
+
+/// (Neptune) Whether the list ahead of a frame is two (`VICTORY_AHEAD_SPLIT=1`; off: one,
+/// recorded when the frame before has been presented): the buffers' pass, begun at the
+/// title's present call by the thread of its own, and where the list is sent a short one
+/// of what changed since: the buffer views written meanwhile and the textures' pass.
+///
+/// The thread that runs the lines waited 10 ms a frame for the one list (runs ve172,
+/// ve178): it is at the next frame's first submission as soon as it has presented. In two
+/// it waited no more, but the short list took 8.2 ms a frame of that thread, as much as
+/// the wait, and of the textures picked by index 71 % were there in the frame their slot
+/// was written where 79 % were (run ve179). So it is off.
+#[cfg(windows)]
+fn ahead_split() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_AHEAD_SPLIT").is_some_and(|v| v == "1"))
 }
 
 /// (Neptune) The list ahead of the next frame ([`ahead_of_frame`]): 0 not begun, 1 being
@@ -762,7 +795,11 @@ fn ahead_begin() {
                         ahead = AHEAD.1.wait(ahead).unwrap_or_else(|e| e.into_inner());
                     }
                 }
-                let list = crate::list::ahead_of_frame();
+                let list = crate::list::ahead_of_frame(if ahead_split() {
+                    crate::draw::AHEAD_BUFFERS
+                } else {
+                    crate::draw::AHEAD_ALL
+                });
                 let mut ahead = lock(&AHEAD.0);
                 ahead.list = list;
                 ahead.state = 2;
@@ -792,6 +829,16 @@ fn ahead_begin() {
 
 #[cfg(windows)]
 static AHEAD_NONE: AtomicBool = AtomicBool::new(false);
+
+/// (Neptune) Whether the list ahead of a frame goes before the frame's first submission
+/// whatever that submission's lists want (`VICTORY_AHEAD_FIRST=0`: before the first one
+/// whose draws want it). The frame's first submission wants it (the thread waited as long
+/// either way, run ve175), so it goes first, as in the runs the picture was judged in.
+#[cfg(windows)]
+fn ahead_first() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("VICTORY_AHEAD_FIRST").is_none_or(|v| v != "0"))
+}
 
 /// (Neptune) Whether the list ahead of a frame is begun at the title's present call
 /// (`VICTORY_AHEAD_EARLY=1`; off: when the present has run).
@@ -1200,7 +1247,7 @@ extern "system" fn present(
         }
         // (Neptune) With `VICTORY_AHEAD_EARLY=1`: the title has recorded its frame, and the
         // list ahead of the next one is recorded from now on ([`ahead_early`]).
-        if ahead_early() {
+        if ahead_early() || ahead_split() {
             ahead_begin();
         }
         wake_releaser();
@@ -1233,11 +1280,19 @@ fn present_now(named: Named) {
     // its fence: a wait is not kept across frames.
     #[cfg(windows)]
     release_held(forces());
+    // (Neptune) A frame none of whose submissions wanted the list ahead of it: sent now,
+    // so that what it uploads is there for the next.
+    #[cfg(windows)]
+    if crate::draw::passes_ahead()
+        && let Some(host) = crate::host::host()
+    {
+        ahead_of_frame(host);
+    }
     let frame = FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
     // (Where the present waits its turn the list ahead of the next frame was begun at the
     // title's call, `present`.)
     #[cfg(windows)]
-    if !async_present() || !ahead_early() {
+    if !async_present() || !(ahead_early() || ahead_split()) {
         ahead_begin();
     }
     if frame.is_power_of_two() {

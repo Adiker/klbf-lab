@@ -125,13 +125,23 @@ pub(crate) fn passes_ahead() -> bool {
 static VIEW_HEAP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 thread_local! {
-    /// (Neptune) This thread records the list that runs ahead of a frame ([`State::passes_ahead`]).
-    static AHEAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// (Neptune) This thread records a list that runs ahead of a frame
+    /// ([`State::passes_ahead`]): 0 not, else what of it ([`AHEAD_ALL`] and the others).
+    static AHEAD: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
 }
+
+/// (Neptune) What a list ahead of a frame holds: the buffers' pass and the textures'.
+pub(crate) const AHEAD_ALL: u8 = 1;
+/// The buffers' pass alone (recorded early, by the thread of its own).
+pub(crate) const AHEAD_BUFFERS: u8 = 2;
+/// The buffer views written since the buffers' pass, and the textures' pass (recorded where
+/// the list is sent).
+pub(crate) const AHEAD_SINCE: u8 = 3;
 
 /// (Neptune) Lists recorded ahead of a frame, and the microseconds that took, since the last
 /// frame line.
-pub(crate) static AHEAD_STATS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+/// Then the same of the short lists of what changed since ([`AHEAD_SINCE`]).
+pub(crate) static AHEAD_STATS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
 /// (Neptune) The least milliseconds between two passes over textures picked by index within
 /// a frame, when the title has written slots since the last one (`VICTORY_TEXTURE_CATCH_UP_MS`,
@@ -331,6 +341,9 @@ pub(crate) struct State {
     /// contents another had takes that one's host slots, and only its own title slots'
     /// notes are made here.
     seen_tables: std::collections::HashSet<(u64, u32, u64)>,
+    /// (Neptune) The host list has been told that its draws want the list ahead of their
+    /// frame (`HostList::wants_ahead`).
+    asked_ahead: std::cell::Cell<bool>,
     /// (Neptune) This recording, for [`crate::descriptor::host::HostHeap::make_listed`] (0: it
     /// has none yet).
     recording: u64,
@@ -897,6 +910,7 @@ impl State {
     /// descriptors as they are now, not as they were when the title set
     /// the targets (a descriptor rewritten in between names another view).
     pub(crate) fn replay(&mut self, list: &HostList) {
+        self.asked_ahead.set(false);
         self.host_pipeline = 0;
         self.host_roots = [0; 2];
         self.host_heaps = [0; 2];
@@ -1586,24 +1600,24 @@ impl State {
     /// submission, what the frame's lists find done ([`passes_ahead`]): the heap's buffer
     /// views brought up to date and the textures picked by index uploaded. `false`: no
     /// draw has had a view heap set yet.
-    pub(crate) fn passes_ahead(&mut self, list: &HostList) -> bool {
+    pub(crate) fn passes_ahead(&mut self, list: &HostList, what: u8) -> bool {
         let at = VIEW_HEAP.load(Ordering::Relaxed);
         if at == 0 {
             return false;
         }
         let began = std::time::Instant::now();
         self.heaps = [at, 0];
-        AHEAD.set(true);
-        if self.heap_buffers(list).is_none() {
+        AHEAD.set(what);
+        if self.heap_buffers(list).is_none() && what != AHEAD_BUFFERS {
             // No shader has picked a buffer from the heap yet: the textures' pass alone.
             let heap = crate::descriptor::heap(at as This);
             if let Some(host) = heap.host() {
                 self.heap_textures(list, heap, host);
             }
         }
-        AHEAD.set(false);
-        AHEAD_STATS[0].fetch_add(1, Ordering::Relaxed);
-        AHEAD_STATS[1].fetch_add(began.elapsed().as_micros() as u64, Ordering::Relaxed);
+        AHEAD.set(0);
+        AHEAD_STATS[usize::from(what == AHEAD_SINCE) * 2].fetch_add(1, Ordering::Relaxed);
+        AHEAD_STATS[usize::from(what == AHEAD_SINCE) * 2 + 1].fetch_add(began.elapsed().as_micros() as u64, Ordering::Relaxed);
         true
     }
 
@@ -1626,11 +1640,13 @@ impl State {
             list.keep(buffer);
         }
         // (Neptune) The pass is the list's that runs ahead of the frame ([`passes_ahead`]).
-        let ahead = AHEAD.get();
+        let what = AHEAD.get();
+        let ahead = what != 0;
         if !ahead && passes_ahead() {
             if VIEW_HEAP.load(Ordering::Relaxed) != at {
                 VIEW_HEAP.store(at, Ordering::Relaxed);
             }
+            list.wants_ahead();
             return Some(gpu);
         }
         // The pass itself once per frame: per list it ran up to 51 times a
@@ -1660,13 +1676,19 @@ impl State {
             .entry(std::ptr::from_ref(host) as usize)
             .or_insert_with(|| (0, Ranges::new()));
         let changed = host.buffer_changes();
-        let slots = if *passes % 16 == 0 {
+        // (Neptune) What changed since the frame's pass ([`AHEAD_SINCE`]): those slots
+        // alone, and their copies alone below.
+        let since = what == AHEAD_SINCE;
+        let slots = if !since && *passes % 16 == 0 {
             ranges.clear();
             host.buffer_slots()
         } else {
             changed
         };
-        *passes += 1;
+        if !since {
+            *passes += 1;
+        }
+        let mut touched: Vec<u32> = Vec::new();
         // Whether the device was there before the pass: a view that removes
         // it is named below.
         static GONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1705,16 +1727,24 @@ impl State {
                 HEAP_VIEWS_ELSEWHERE.fetch_add(1, Ordering::Relaxed);
             }
             ranges.insert(index, (shadow, address, address + len));
+            if since {
+                touched.push(index);
+            }
         }
         let views = ranges.len() as u32;
         // Per host copy, the span its picked views cover.
         let mut spans: std::collections::HashMap<usize, (std::sync::Arc<crate::shadow::Shadow>, u64, u64)> =
             std::collections::HashMap::new();
-        for (shadow, from, to) in ranges.values() {
+        let mut span_of = |(shadow, from, to): &(std::sync::Arc<crate::shadow::Shadow>, u64, u64)| {
             let key = std::sync::Arc::as_ptr(shadow) as usize;
             let span = spans.entry(key).or_insert_with(|| (shadow.clone(), *from, *to));
             span.1 = span.1.min(*from);
             span.2 = span.2.max(*to);
+        };
+        if since {
+            touched.iter().filter_map(|index| ranges.get(index)).for_each(&mut span_of);
+        } else {
+            ranges.values().for_each(&mut span_of);
         }
         drop(kept);
         let bytes: u64 = spans.values().map(|s| s.2 - s.1).sum();
@@ -1751,7 +1781,9 @@ impl State {
             shadow.refresh(list, *from, to - from);
         }
         let textures_began = std::time::Instant::now();
-        self.heap_textures(list, heap, host);
+        if what != AHEAD_BUFFERS {
+            self.heap_textures(list, heap, host);
+        }
         HEAP_PASS_PARTS[0].fetch_add(textures_began.elapsed().as_micros() as u64, Ordering::Relaxed);
         HEAP_BUFFER_PASSES.fetch_add(1, Ordering::Relaxed);
         HEAP_BUFFER_MICROS.fetch_add(started.elapsed().as_micros() as u64, Ordering::Relaxed);
@@ -1804,11 +1836,16 @@ impl State {
         // (Neptune) The frame's pass and those that catch up are the list's that runs ahead
         // of the frame ([`passes_ahead`]): here the heap is noted for it.
         let ahead = passes_ahead();
-        if ahead
-            && let Some(&at) = self.heaps.iter().filter(|&&h| h != 0).find(|&&h| !crate::descriptor::heap(h as This).samplers())
-            && VIEW_HEAP.load(Ordering::Relaxed) != at
-        {
-            VIEW_HEAP.store(at, Ordering::Relaxed);
+        if ahead {
+            if let Some(&at) = self.heaps.iter().filter(|&&h| h != 0).find(|&&h| !crate::descriptor::heap(h as This).samplers())
+                && VIEW_HEAP.load(Ordering::Relaxed) != at
+            {
+                VIEW_HEAP.store(at, Ordering::Relaxed);
+            }
+            // A list that draws may pick textures from the heap: behind the list ahead.
+            if !self.asked_ahead.replace(true) {
+                list.wants_ahead();
+            }
         }
         let budget = if bake && left > 0 {
             // What a bake may read must be there now: up to 2 GiB.

@@ -545,13 +545,13 @@ pub(crate) fn detach_parts(lists: &[This]) -> Parts {
 /// passes over the heap's views, recorded now (`crate::draw::passes_ahead`). `None`: not
 /// asked for, no draw has had a view heap yet, or no host list.
 #[cfg(windows)]
-pub(crate) fn ahead_of_frame() -> Option<Detached> {
+pub(crate) fn ahead_of_frame(what: u8) -> Option<Detached> {
     if !crate::draw::passes_ahead() {
         return None;
     }
     let host = fresh_list()?;
     let mut state = crate::draw::State::default();
-    let recorded = state.passes_ahead(&host);
+    let recorded = state.passes_ahead(&host, what);
     host.close();
     if !recorded {
         // Used again as it is.
