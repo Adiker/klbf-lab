@@ -16,7 +16,9 @@ First room, automated runs of 5 to 7 min, each stopped by our script (no crash i
 | + zm0kiemedia's clamps | `VICTORY_CLAMP_AFTER_WRITER=1` | 17.6 / 21.9 | checked (a mirror stays black) |
 | same | `VICTORY_PASSES_AHEAD=0` | 20.9 / 26.4, 21.3 / 26.4 | checked: face correct |
 | + avatarmanz's renderer port 1 | `VICTORY_PORT_CONSTANTS=1` | 22.5 / 28.5, 21.4 / 28.5 | checked |
-| **+ renderer port 2 (this build)** | `VICTORY_PORT_DESCRIPTORS=1` | **22.4 / 30.5, 23.9 / 30.1, 24.3 / 30.1** | checked: face correct |
+| + renderer port 2 | `VICTORY_PORT_DESCRIPTORS=1` | 22.4 / 30.5, 23.9 / 30.1, 24.3 / 30.1 | checked: face correct |
+
+The last three lines include `VICTORY_PASSES_AHEAD=0`. Played with a controller, it makes hedges, distant trees and shadows disappear for a frame now and then. **This build leaves it at its default** (the heap passes run ahead of the frame): no flashing, about 20 fps in the first room, to be measured again.
 
 Settings tried on this build, none kept: `VICTORY_WIDE_THREADS=8` 23.3 / 29.2; `VICTORY_LIST_POOL_MB=4096` 24.4 / 29.9 and 22.8 / 29.3; `VICTORY_CARD_BUFFERS_MB=2048` 24.7 / 29.6; `=3072` 24.7 / 29.3; `=0` 11.2 / 13.2.
 

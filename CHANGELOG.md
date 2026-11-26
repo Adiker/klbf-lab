@@ -7,7 +7,7 @@ Product and controller names (Xbox, DualSense…) are only used to say what a bu
 ## Test build `beta-2` — 26 Nov 2026
 - **Base:** Neptune 2026-11-25m (Traffic & zm0kiemedia) with WillyboPeep's changes, face fixes (proneonn, tippythetaidum), fxceless/victory-fork#1216 (GamingRipperDoc) and #1213 (IxMxAMAR, MalfoyDraco99), zm0kiemedia's clamps and avatarmanz's renderer port 1 and 2.
 - **Ours:** the crash-surviving pipeline pre-build and skip list, KLBF Lab names, `play.ps1` with our measured settings.
-- **Result on RX 9070 XT, Series S + FSR:** median 22.4–24.3 fps in the first room (three runs), peaks ~30, clean picture, no crash in our runs (stopped by our script).
+- **Result on RX 9070 XT, Series S + FSR:** about 20 fps in the first room, clean picture with no flashing in real play, no crash in our runs (stopped by our script). `VICTORY_PASSES_AHEAD=0` is no longer set: about 3 fps more, but vegetation and shadows flash for a frame.
 
 ## Lab 39 (test) — 25 Nov 2026
 - **Water physics fixed:** the ocean height map the GPU computes is copied back into the game's memory (from Geckomacabre/vx-layer), and XOR swizzle modes are addressed (from MiamiGame/XTP, Mesa addrlib tables). Boats float and move.
